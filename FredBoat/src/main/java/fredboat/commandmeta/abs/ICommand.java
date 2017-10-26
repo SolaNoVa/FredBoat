@@ -25,18 +25,18 @@
 
 package fredboat.commandmeta.abs;
 
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+
+import javax.annotation.Nonnull;
 
 public interface ICommand {
 
-    public abstract void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args);
+    void onInvoke(@Nonnull CommandContext context);
 
     /**
-     * @param guild Guild where the help is going to be posted to for i18n the help string; null value should be fine for a default language
+     * @param context Context for where the help is going to be posted, mostly used for i18ning the help string
      * @return an unformatted help string: convention {0} = prefix, {1} = command, fill these in by the running bot, more parameters can be present
      */
-    String help(Guild guild);
+    @Nonnull
+    String help(@Nonnull Context context);
 }

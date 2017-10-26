@@ -25,33 +25,36 @@
 
 package fredboat.command.music.control;
 
-import fredboat.Config;
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.audio.queue.RepeatMode;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 
-public class RepeatCommand extends Command implements IMusicCommand {
+import javax.annotation.Nonnull;
+
+public class RepeatCommand extends Command implements IMusicCommand, ICommandRestricted {
+
+    public RepeatCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
 
-        if (args.length < 2) {
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+        if (!context.hasArguments()) {
+            HelpCommand.sendFormattedCommandHelp(context);
             return;
         }
 
         RepeatMode desiredRepeatMode;
-        String userInput = args[1];
+        String userInput = context.args[0];
         switch (userInput) {
             case "off":
             case "out":
@@ -69,8 +72,7 @@ public class RepeatCommand extends Command implements IMusicCommand {
                 break;
             case "help":
             default:
-                String command = args[0].substring(Config.CONFIG.getPrefix().length());
-                HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+                HelpCommand.sendFormattedCommandHelp(context);
                 return;
         }
 
@@ -78,20 +80,27 @@ public class RepeatCommand extends Command implements IMusicCommand {
 
         switch (desiredRepeatMode) {
             case OFF:
-                channel.sendMessage(I18n.get(guild).getString("repeatOff")).queue();
+                context.reply(context.i18n("repeatOff"));
                 break;
             case SINGLE:
-                channel.sendMessage(I18n.get(guild).getString("repeatOnSingle")).queue();
+                context.reply(context.i18n("repeatOnSingle"));
                 break;
             case ALL:
-                channel.sendMessage(I18n.get(guild).getString("repeatOnAll")).queue();
+                context.reply(context.i18n("repeatOnAll"));
                 break;
         }
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         String usage = "{0}{1} single|all|off\n#";
-        return usage + I18n.get(guild).getString("helpRepeatCommand");
+        return usage + context.i18n("helpRepeatCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

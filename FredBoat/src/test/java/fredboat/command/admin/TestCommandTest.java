@@ -1,6 +1,7 @@
 package fredboat.command.admin;
 
 import fredboat.Config;
+import fredboat.FakeContext;
 import fredboat.ProvideJDASingleton;
 import fredboat.db.DatabaseManager;
 import org.junit.jupiter.api.AfterAll;
@@ -27,23 +28,30 @@ class TestCommandTest extends ProvideJDASingleton {
     void onInvoke() {
         Assumptions.assumeFalse(isTravisEnvironment(), () -> "Aborting test: Travis CI detected");
         Assumptions.assumeTrue(initialized);
-        String[] args = {"test", "10", "10"};
+        String[] args = {"10", "10"};
 
         //test the connection if one was specified
         String jdbcUrl = Config.CONFIG.getJdbcUrl();
         if (jdbcUrl != null && !"".equals(jdbcUrl)) {
             //start the database
-            DatabaseManager.startup(jdbcUrl, null, Config.CONFIG.getHikariPoolSize());
-            Assertions.assertTrue(new TestCommand().invoke(testChannel, testSelfMember, args));
-            DatabaseManager.shutdown();
+            DatabaseManager dbm = new DatabaseManager(jdbcUrl, null, Config.CONFIG.getHikariPoolSize());
+            try {
+                dbm.startup();
+                Assertions.assertTrue(new TestCommand("").invoke(dbm, new FakeContext(testChannel, testSelfMember, testGuild), args));
+            } finally {
+                dbm.shutdown();
+            }
         }
 
         //test the internal SQLite db
-        DatabaseManager.startup("jdbc:sqlite:fredboat.db", "org.hibernate.dialect.SQLiteDialect", 1);
-        Assertions.assertTrue(new TestCommand().invoke(testChannel, testSelfMember, args));
-
-        //close the database
-        DatabaseManager.shutdown();
+        args[0] = args[1] = "2";
+        DatabaseManager dbm = new DatabaseManager("jdbc:sqlite:fredboat.db", "org.hibernate.dialect.SQLiteDialect", 1);
+        try {
+            dbm.startup();
+            Assertions.assertTrue(new TestCommand("").invoke(dbm, new FakeContext(testChannel, testSelfMember, testGuild), args));
+        } finally {
+            dbm.shutdown();
+        }
         bumpPassedTests();
     }
 }

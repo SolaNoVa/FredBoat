@@ -26,37 +26,45 @@
 package fredboat.command.music.control;
 
 import fredboat.Config;
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
-public class PauseCommand extends Command implements IMusicCommand {
+public class PauseCommand extends Command implements IMusicCommand, ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
-        player.setCurrentTC(channel);
-        if (player.isQueueEmpty()) {
-            channel.sendMessage(I18n.get(guild).getString("playQueueEmpty")).queue();
-        } else if (player.isPaused()) {
-            channel.sendMessage(I18n.get(guild).getString("pauseAlreadyPaused")).queue();
-        } else {
-            player.pause();
-            channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("pauseSuccess"), Config.CONFIG.getPrefix())).queue();
-        }
+    public PauseCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpPauseCommand");
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+        if (player.isQueueEmpty()) {
+            context.reply(context.i18n("playQueueEmpty"));
+        } else if (player.isPaused()) {
+            context.reply(context.i18n("pauseAlreadyPaused"));
+        } else {
+            player.pause();
+            context.reply(context.i18nFormat("pauseSuccess", Config.CONFIG.getPrefix()));
+        }
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpPauseCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

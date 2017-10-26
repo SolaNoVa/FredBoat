@@ -25,99 +25,136 @@
 
 package fredboat.command.util;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import fredboat.Config;
-import fredboat.command.fun.TalkCommand;
 import fredboat.command.music.control.SelectCommand;
 import fredboat.commandmeta.CommandRegistry;
 import fredboat.commandmeta.abs.Command;
-import fredboat.commandmeta.abs.ICommandOwnerRestricted;
-import fredboat.commandmeta.abs.IMusicBackupCommand;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IUtilCommand;
 import fredboat.feature.I18n;
+import fredboat.feature.metrics.Metrics;
+import fredboat.messaging.CentralMessaging;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.util.Emojis;
 import fredboat.util.TextUtils;
+import net.dv8tion.jda.core.Permission;
 import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
-import net.dv8tion.jda.core.exceptions.RateLimitedException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.dv8tion.jda.core.events.message.priv.PrivateMessageReceivedEvent;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.text.MessageFormat;
+import java.util.concurrent.TimeUnit;
 
-public class HelpCommand extends Command implements IMusicBackupCommand, IUtilCommand {
+public class HelpCommand extends Command implements IUtilCommand {
 
     //This can be set using eval in case we need to change it in the future ~Fre_d
     public static String inviteLink = "https://discord.gg/cgPFW4q";
 
-    private static final Logger log = LoggerFactory.getLogger(HelpCommand.class);
+    //keeps track of whether a user received help lately to avoid spamming/clogging up DMs which are rather harshly ratelimited
+    private static final Cache<Long, Boolean> helpReceivedRecently = CacheBuilder.newBuilder()
+            .recordStats()
+            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .build();
+
+    public HelpCommand(String name, String... aliases) {
+        super(name, aliases);
+        Metrics.instance().cacheMetrics.addCache("helpReceivedRecently", helpReceivedRecently);
+    }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
+    public void onInvoke(@Nonnull CommandContext context) {
 
-        if (args.length > 1) {
-            String commandOrAlias = args[1];
-            sendFormattedCommandHelp(guild, channel, invoker, commandOrAlias);
+        if (context.hasArguments()) {
+            sendFormattedCommandHelp(context, context.args[0]);
         } else {
-            sendGeneralHelp(guild, channel, invoker);
+            sendGeneralHelp(context);
         }
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1} OR {0}{1} <command>\n#";
-        return usage + I18n.get(guild).getString("helpHelpCommand");
+    public String help(@Nonnull Context context) {
+        return "{0}{1} OR {0}{1} <command>\n#" + context.i18n("helpHelpCommand");
     }
 
-    private static void sendGeneralHelp(Guild guild, TextChannel channel, Member invoker) {
-        if (!invoker.getUser().hasPrivateChannel()) {
-            try {
-                invoker.getUser().openPrivateChannel().complete(true);
-            } catch (RateLimitedException e) {
-                throw new RuntimeException(e);
-            }
+    //for answering the help command from a guild
+    public static void sendGeneralHelp(@Nonnull CommandContext context) {
+        long userId = context.invoker.getUser().getIdLong();
+        if (helpReceivedRecently.getIfPresent(userId) != null) {
+            return;
         }
-        invoker.getUser().getPrivateChannel().sendMessage(getHelpDmMsg(guild)).queue();
-        String out = I18n.get(guild).getString("helpSent");
-        out += "\n" + MessageFormat.format(I18n.get(guild).getString("helpCommandsPromotion"), "`" + Config.CONFIG.getPrefix() + "commands`");
-        TextUtils.replyWithName(channel, invoker, out);
+
+        context.replyPrivate(getHelpDmMsg(context.guild),
+                success -> {
+                    helpReceivedRecently.put(userId, true);
+                    String out = context.i18n("helpSent");
+                    out += "\n" + context.i18nFormat("helpCommandsPromotion",
+                            "`" + Config.CONFIG.getPrefix() + "commands`");
+                    if (context.hasPermissions(Permission.MESSAGE_WRITE)) {
+                        context.replyWithName(out);
+                    }
+                },
+                failure -> {
+                    if (context.hasPermissions(Permission.MESSAGE_WRITE)) {
+                        context.replyWithName(Emojis.EXCLAMATION + context.i18n("helpDmFailed"));
+                    }
+                }
+        );
     }
 
-    public static String getFormattedCommandHelp(Guild guild, Command command, String commandOrAlias) {
-        String helpStr = command.help(guild);
+    //for answering private messages with the help
+    public static void sendGeneralHelp(@Nonnull PrivateMessageReceivedEvent event) {
+        if (helpReceivedRecently.getIfPresent(event.getAuthor().getIdLong()) != null) {
+            return;
+        }
+
+        helpReceivedRecently.put(event.getAuthor().getIdLong(), true);
+        CentralMessaging.sendMessage(event.getChannel(), getHelpDmMsg(null));
+    }
+
+    public static String getFormattedCommandHelp(Context context, Command command, String commandOrAlias) {
+        String helpStr = command.help(context);
         //some special needs
         //to display helpful information on some commands: thirdParam = {2} in the language resources
         String thirdParam = "";
-        if (command instanceof TalkCommand)
-            thirdParam = guild.getSelfMember().getEffectiveName();
-        else if (command instanceof SelectCommand)
+        if (command instanceof SelectCommand)
             thirdParam = "play";
 
         return MessageFormat.format(helpStr, Config.CONFIG.getPrefix(), commandOrAlias, thirdParam);
     }
 
-    public static void sendFormattedCommandHelp(Guild guild, TextChannel channel, Member invoker, String commandOrAlias) {
+    public static void sendFormattedCommandHelp(CommandContext context) {
+        sendFormattedCommandHelp(context, context.trigger);
+    }
 
-        CommandRegistry.CommandEntry commandEntry = CommandRegistry.getCommand(commandOrAlias);
+    private static void sendFormattedCommandHelp(CommandContext context, String trigger) {
+        CommandRegistry.CommandEntry commandEntry = CommandRegistry.getCommand(trigger);
         if (commandEntry == null) {
-            String out = Config.CONFIG.getPrefix() + commandOrAlias + ": " + I18n.get(guild).getString("helpUnknownCommand");
-            out += "\n" + MessageFormat.format(I18n.get(guild).getString("helpCommandsPromotion"), "`" + Config.CONFIG.getPrefix() + "commands`");
-            TextUtils.replyWithName(channel, invoker, out);
+            String out = "`" + Config.CONFIG.getPrefix() + trigger + "`: " + context.i18n("helpUnknownCommand");
+            out += "\n" + context.i18nFormat("helpCommandsPromotion",
+                    "`" + Config.CONFIG.getPrefix() + "commands`");
+            context.replyWithName(out);
             return;
         }
 
         Command command = commandEntry.command;
 
-        String out = getFormattedCommandHelp(guild, command, commandOrAlias);
+        String out = getFormattedCommandHelp(context, command, trigger);
 
-        if (command instanceof ICommandOwnerRestricted)
-            out += "\n#" + I18n.get(guild).getString("helpCommandOwnerRestricted");
-        out = TextUtils.asMarkdown(out);
-        out = I18n.get(guild).getString("helpProperUsage") + out;
-        TextUtils.replyWithName(channel, invoker, out);
+        if (command instanceof ICommandRestricted
+                && ((ICommandRestricted) command).getMinimumPerms() == PermissionLevel.BOT_OWNER)
+            out += "\n#" + context.i18n("helpCommandOwnerRestricted");
+        out = TextUtils.asCodeBlock(out, "md");
+        out = context.i18n("helpProperUsage") + out;
+        context.replyWithName(out);
     }
 
-    public static String getHelpDmMsg(Guild guild) {
+    public static String getHelpDmMsg(@Nullable Guild guild) {
         return MessageFormat.format(I18n.get(guild).getString("helpDM"), inviteLink);
     }
 }

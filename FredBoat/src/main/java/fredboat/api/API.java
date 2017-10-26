@@ -27,14 +27,15 @@ package fredboat.api;
 
 import fredboat.Config;
 import fredboat.FredBoat;
-import fredboat.audio.PlayerRegistry;
-import fredboat.db.entity.UConfig;
+import fredboat.audio.player.PlayerRegistry;
+import fredboat.feature.metrics.Metrics;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import spark.Spark;
+
 
 public class API {
 
@@ -61,16 +62,17 @@ public class API {
         });
 
         Spark.get("/stats", (req, res) -> {
+            Metrics.apiServed.labels("/stats").inc();
             res.type("application/json");
 
             JSONObject root = new JSONObject();
             JSONArray a = new JSONArray();
 
-            for(FredBoat fb : FredBoat.getShards()) {
+            for (FredBoat fb : FredBoat.getShards()) {
                 JSONObject fbStats = new JSONObject();
                 fbStats.put("id", fb.getShardInfo().getShardId())
-                        .put("guilds", fb.getJda().getGuilds().size())
-                        .put("users", fb.getJda().getUsers().size())
+                        .put("guilds", fb.getGuildCount())
+                        .put("users", fb.getUserCount())
                         .put("status", fb.getJda().getStatus());
 
                 a.put(fbStats);
@@ -80,27 +82,14 @@ public class API {
             g.put("playingPlayers", PlayerRegistry.getPlayingPlayers().size())
                     .put("totalPlayers", PlayerRegistry.getRegistry().size())
                     .put("distribution", Config.CONFIG.getDistribution())
-                    .put("guilds", FredBoat.getAllGuilds().size())
-                    .put("users", FredBoat.getAllUsersAsMap().size());
+                    .put("guilds", FredBoat.getTotalGuildsCount())
+                    .put("users", FredBoat.getTotalUniqueUsersCount());
 
             root.put("shards", a);
             root.put("global", g);
 
             return root;
         });
-
-        Spark.post("/callback", (request, response) -> {
-            JSONObject out = new JSONObject();
-            JSONObject body = new JSONObject(request.body());
-
-            UConfig uconfig = OAuthManager.handleCallback(body.getString("code"));
-            out.put("bearer", uconfig.getBearer())
-                    .put("refresh", uconfig.getRefresh())
-                    .put("userId", uconfig.getUserId());
-
-            return out;
-        });
-
 
         /* Exception handling */
         Spark.exception(Exception.class, (e, request, response) -> {
@@ -109,6 +98,18 @@ public class API {
             response.body(ExceptionUtils.getStackTrace(e));
             response.type("text/plain");
             response.status(500);
+        });
+    }
+
+    public static void turnOnMetrics() {
+        if (!Config.CONFIG.isRestServerEnabled()) {
+            log.warn("Rest server is not enabled. Skipping Spark ignition!");
+            return;
+        }
+
+        Spark.get("/metrics", (req, resp) -> {
+            Metrics.apiServed.labels("/metrics").inc();
+            return Metrics.instance().metricsServlet.servletGet(req.raw(), resp.raw());
         });
     }
 

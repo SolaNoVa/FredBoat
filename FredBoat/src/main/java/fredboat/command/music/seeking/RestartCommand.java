@@ -25,36 +25,47 @@
 
 package fredboat.command.music.seeking;
 
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
-public class RestartCommand extends Command implements IMusicCommand {
+public class RestartCommand extends Command implements IMusicCommand, ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.getExisting(guild);
-
-        if (player != null && !player.isQueueEmpty()) {
-            player.getPlayingTrack().getTrack().setPosition(player.getPlayingTrack().getStartPosition());
-            channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("restartSuccess"), player.getPlayingTrack().getEffectiveTitle())).queue();
-        } else {
-            TextUtils.replyWithName(channel, invoker, I18n.get(guild).getString("queueEmpty"));
-        }
+    public RestartCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpRestartCommand");
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getExisting(context.guild);
+
+        if (player != null && !player.isQueueEmpty()) {
+            if (player.getPlayingTrack() == null) {
+                player.play();
+            }
+            player.seekTo(player.getPlayingTrack().getStartPosition());
+            context.reply(context.i18nFormat("restartSuccess", player.getPlayingTrack().getEffectiveTitle()));
+        } else {
+            context.replyWithName(context.i18n("queueEmpty"));
+        }
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpRestartCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

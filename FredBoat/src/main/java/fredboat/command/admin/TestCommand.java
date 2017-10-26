@@ -27,22 +27,21 @@ package fredboat.command.admin;
 
 import fredboat.FredBoat;
 import fredboat.commandmeta.abs.Command;
-import fredboat.commandmeta.abs.ICommandOwnerRestricted;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.db.DatabaseManager;
-import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import javax.persistence.EntityManager;
 
 /**
  * Stress tests the database
  */
-public class TestCommand extends Command implements ICommandOwnerRestricted {
+public class TestCommand extends Command implements ICommandRestricted {
 
     private static final Logger log = LoggerFactory.getLogger(TestCommand.class);
 
@@ -53,35 +52,39 @@ public class TestCommand extends Command implements ICommandOwnerRestricted {
     private final String CREATE_TEST_TABLE = "CREATE TABLE IF NOT EXISTS test (id serial, val integer, PRIMARY KEY (id));";
     private final String INSERT_TEST_TABLE = "INSERT INTO test (val) VALUES (:val) ";
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        FredBoat.executor.submit(() -> invoke(channel, invoker, args));
+    public TestCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
-    boolean invoke(TextChannel channel, Member invoker, String[] args) {
+    @Override
+    public void onInvoke(@Nonnull CommandContext context) {
+        FredBoat.executor.submit(() -> invoke(FredBoat.getDbManager(), context, context.args));
+    }
+
+    boolean invoke(DatabaseManager dbm, Context context, String args[]) {
 
         boolean result = false;
 
         int t = 20;
         int o = 2000;
-        if (args.length > 2) {
-            t = Integer.valueOf(args[1]);
-            o = Integer.valueOf(args[2]);
+        if (args.length > 1) {
+            t = Integer.valueOf(args[0]);
+            o = Integer.valueOf(args[1]);
         }
         final int threads = t;
         final int operations = o;
-        if (channel != null && invoker != null) {
-            TextUtils.replyWithName(channel, invoker, "Beginning stress test with " + threads + " threads each doing " + operations + " operations");
+        if (context.getTextChannel() != null && context.getMember() != null) {
+            context.replyWithName("Beginning stress test with " + threads + " threads each doing " + operations + " operations");
         }
 
-        prepareStressTest();
+        prepareStressTest(dbm);
         long started = System.currentTimeMillis();
         Result[] results = new Result[threads];
         Throwable[] exceptions = new Throwable[threads];
 
         for (int i = 0; i < threads; i++) {
             results[i] = Result.WORKING;
-            new StressTestThread(i, operations, results, exceptions).start();
+            new StressTestThread(i, operations, results, exceptions, dbm).start();
         }
 
         //wait for when it's done and report the results
@@ -115,8 +118,8 @@ public class TestCommand extends Command implements ICommandOwnerRestricted {
         }
         out += "\n Time taken: " + ((System.currentTimeMillis() - started)) + "ms for " + (threads * operations) + " requested operations.`";
         log.info(out);
-        if (channel != null && invoker != null) {
-            TextUtils.replyWithName(channel, invoker, out);
+        if (context.getTextChannel() != null && context.getMember() != null) {
+            context.replyWithName(out);
         }
 
         return result;
@@ -131,15 +134,17 @@ public class TestCommand extends Command implements ICommandOwnerRestricted {
         return true;
     }
 
-    private void prepareStressTest() {
+    private void prepareStressTest(DatabaseManager dbm) {
         //drop and recreate the test table
-        EntityManager em = DatabaseManager.getEntityManager();
-        em.getTransaction().begin();
-        em.createNativeQuery(DROP_TEST_TABLE).executeUpdate();
-        em.createNativeQuery(CREATE_TEST_TABLE).executeUpdate();
-        em.getTransaction().commit();
-
-        em.close();
+        EntityManager em = dbm.getEntityManager();
+        try {
+            em.getTransaction().begin();
+            em.createNativeQuery(DROP_TEST_TABLE).executeUpdate();
+            em.createNativeQuery(CREATE_TEST_TABLE).executeUpdate();
+            em.getTransaction().commit();
+        } finally {
+            em.close();
+        }
     }
 
     private class StressTestThread extends Thread {
@@ -148,13 +153,16 @@ public class TestCommand extends Command implements ICommandOwnerRestricted {
         private int operations;
         private Result[] results;
         private Throwable[] exceptions;
+        private DatabaseManager dbm;
 
-
-        StressTestThread(int number, int operations, Result[] results, Throwable[] exceptions) {
+        
+        StressTestThread(int number, int operations, Result[] results, Throwable[] exceptions, DatabaseManager dbm) {
+            super(StressTestThread.class.getSimpleName() + " number");
             this.number = number;
             this.operations = operations;
             this.results = results;
             this.exceptions = exceptions;
+            this.dbm = dbm;
         }
 
         @Override
@@ -163,13 +171,16 @@ public class TestCommand extends Command implements ICommandOwnerRestricted {
             EntityManager em = null;
             try {
                 for (int i = 0; i < operations; i++) {
-                    em = DatabaseManager.getEntityManager();
-                    em.getTransaction().begin();
-                    em.createNativeQuery(INSERT_TEST_TABLE)
-                            .setParameter("val", (int) (Math.random() * 10000))
-                            .executeUpdate();
-                    em.getTransaction().commit();
-                    em.close(); //go crazy and request and close the EM for every single operation, this is a stress test after all
+                    em = dbm.getEntityManager();
+                    try {
+                        em.getTransaction().begin();
+                        em.createNativeQuery(INSERT_TEST_TABLE)
+                                .setParameter("val", (int) (Math.random() * 10000))
+                                .executeUpdate();
+                        em.getTransaction().commit();
+                    } finally {
+                        em.close(); //go crazy and request and close the EM for every single operation, this is a stress test after all
+                    }
                 }
             } catch (Exception e) {
                 results[number] = Result.FAILED;
@@ -184,8 +195,15 @@ public class TestCommand extends Command implements ICommandOwnerRestricted {
         }
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1} [n m]\n#Stress test the database with n threads each doing m operations. Results will be shown after max 10 minutes.";
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.BOT_OWNER;
     }
 }

@@ -25,46 +25,36 @@
 
 package fredboat.command.fun;
 
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IFunCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.MessageBuilder;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
 public class PatCommand extends RandomImageCommand implements IFunCommand {
 
-    public PatCommand(String[] urls) {
-        super(urls);
-    }
-
-    public PatCommand(String imgurAlbumUrl) {
-        super(imgurAlbumUrl);
+    public PatCommand(String imgurAlbumUrl, String name, String... aliases) {
+        super(imgurAlbumUrl, name, aliases);
     }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-
-        Message patMessage = null;
-        if (message.getMentionedUsers().size() > 0) {
-            if (message.getMentionedUsers().get(0) == guild.getJDA().getSelfUser()) {
-                patMessage = new MessageBuilder().append(I18n.get(guild).getString("patBot")).build();
+    public void onInvoke(@Nonnull CommandContext context) {
+        String patMessage = null;
+        if (!context.getMentionedUsers().isEmpty()) {
+            if (context.getMentionedUsers().get(0).getIdLong() == context.msg.getJDA().getSelfUser().getIdLong()) {
+                patMessage = context.i18n("patBot");
             } else {
-                patMessage = new MessageBuilder()
-                        .append("_")
-                        .append(MessageFormat.format(I18n.get(guild).getString("patSuccess"), message.getMentionedUsers().get(0).getAsMention()))
-                        .append("_")
-                        .build();
+                patMessage = "_"
+                        + context.i18nFormat("patSuccess", context.getMentionedUsers().get(0).getAsMention())
+                        + "_";
             }
         }
-        super.sendRandomFileWithMessage(channel, patMessage);
+        context.replyImage(super.getRandomImageUrl(), patMessage);
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1} @<username>\n#Pat someone.";
     }
 }

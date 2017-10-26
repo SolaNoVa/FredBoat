@@ -36,22 +36,30 @@ import fredboat.command.music.seeking.RewindCommand;
 import fredboat.command.music.seeking.SeekCommand;
 import fredboat.commandmeta.CommandRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IMusicCommand;
 import fredboat.commandmeta.abs.IUtilCommand;
-import fredboat.feature.I18n;
+import fredboat.messaging.internal.Context;
+import fredboat.util.Emojis;
 import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import net.dv8tion.jda.core.Permission;
 
 import java.util.*;
+import javax.annotation.Nonnull;
 
 public class MusicHelpCommand extends Command implements IUtilCommand {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
+    public MusicHelpCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
 
+    @Override
+    public void onInvoke(@Nonnull CommandContext context) {
+        getFormattedCommandHelp(context);
+    }
+
+    //TODO this does a lot of i18n calls, music comms are static tho (except for the language), so they should be cached per language
+    private static List<String> getMusicComms(Context context) {
         //aggregate all commands and the aliases they may be called with
         Map<Class<? extends Command>, List<String>> commandToAliases = new HashMap<>();
         Set<String> commandsAndAliases = CommandRegistry.getRegisteredCommandsAndAliases();
@@ -71,7 +79,7 @@ public class MusicHelpCommand extends Command implements IUtilCommand {
             if (c instanceof IMusicCommand)
                 sortedComms.add(c);
         }
-        Collections.sort(sortedComms, new MusicCommandsComparator());
+        sortedComms.sort(new MusicCommandsComparator());
 
         //create help strings for each music command and its main alias
         List<String> musicComms = new ArrayList<>();
@@ -79,26 +87,43 @@ public class MusicHelpCommand extends Command implements IUtilCommand {
 
             String mainAlias = commandToAliases.get(command.getClass()).get(0);
             mainAlias = CommandRegistry.getCommand(mainAlias).name;
-            String formattedHelp = HelpCommand.getFormattedCommandHelp(guild, command, mainAlias);
+            String formattedHelp = HelpCommand.getFormattedCommandHelp(context, command, mainAlias);
             musicComms.add(formattedHelp);
         }
 
-        //output the resulting help, splitting it in several messages if necessary
-        String out = "< " + I18n.get(guild).getString("helpMusicCommandsHeader") + " >\n";
+        return musicComms;
+    }
+
+    private static void getFormattedCommandHelp(CommandContext context) {
+        final List<String> musicComms = getMusicComms(context);
+
+        // Start building string:
+        String out = "< " + context.i18n("helpMusicCommandsHeader") + " >\n";
         for (String s : musicComms) {
             if (out.length() + s.length() >= 1990) {
-                channel.sendMessage(TextUtils.asMarkdown(out)).queue();
+                sendCommandsHelpInDM(context, out);
                 out = "";
             }
             out += s + "\n";
         }
-        channel.sendMessage(TextUtils.asMarkdown(out)).queue();
+        sendCommandsHelpInDM(context, out);
     }
 
+    private static void sendCommandsHelpInDM(CommandContext context, String dmMsg) {
+        context.replyPrivate(TextUtils.asCodeBlock(dmMsg, "md"),
+                success -> context.replyWithName(context.i18n("helpSent")),
+                failure -> {
+                    if (context.hasPermissions(Permission.MESSAGE_WRITE)) {
+                        context.replyWithName(Emojis.EXCLAMATION + context.i18n("helpDmFailed"));
+                    }
+                }
+        );
+    }
+
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpMusicHelpCommand");
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpMusicHelpCommand");
     }
 
     /**

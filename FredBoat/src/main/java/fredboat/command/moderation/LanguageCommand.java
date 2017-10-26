@@ -27,43 +27,52 @@ package fredboat.command.moderation;
 
 import fredboat.Config;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IModerationCommand;
 import fredboat.feature.I18n;
-import fredboat.util.TextUtils;
+import fredboat.messaging.CentralMessaging;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.perms.PermsUtil;
 import net.dv8tion.jda.core.MessageBuilder;
 import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 public class LanguageCommand extends Command implements IModerationCommand {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        if(args.length != 2) {
-            handleNoArgs(guild, channel, invoker, message, args);
-            return;
-        }
-
-        //Assume proper usage and that we are about to set a new language
-        try {
-            I18n.set(guild, args[1]);
-        } catch (I18n.LanguageNotSupportedException e) {
-            TextUtils.replyWithName(channel, invoker, MessageFormat.format(I18n.get(guild).getString("langInvalidCode"), args[1]));
-            return;
-        }
-
-        TextUtils.replyWithName(channel, invoker, MessageFormat.format(I18n.get(guild).getString("langSuccess"), I18n.getLocale(guild).getNativeName()));
+    public LanguageCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
-    private void handleNoArgs(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        MessageBuilder mb = new MessageBuilder()
-                .append(I18n.get(guild).getString("langInfo").replace(Config.DEFAULT_PREFIX, Config.CONFIG.getPrefix()))
+    @Override
+    public void onInvoke(@Nonnull CommandContext context) {
+        Guild guild = context.guild;
+        if (!context.hasArguments()) {
+            handleNoArgs(context);
+            return;
+        }
+
+        if (!PermsUtil.checkPermsWithFeedback(PermissionLevel.ADMIN, context))
+            return;
+        
+        //Assume proper usage and that we are about to set a new language
+        try {
+            I18n.set(guild, context.args[0]);
+        } catch (I18n.LanguageNotSupportedException e) {
+            context.replyWithName(context.i18nFormat("langInvalidCode", context.args[0]));
+            return;
+        }
+
+        context.replyWithName(context.i18nFormat("langSuccess", I18n.getLocale(guild).getNativeName()));
+    }
+
+    private void handleNoArgs(CommandContext context) {
+        MessageBuilder mb = CentralMessaging.getClearThreadLocalMessageBuilder()
+                .append(context.i18n("langInfo").replace(Config.DEFAULT_PREFIX, Config.CONFIG.getPrefix()))//todo custom prefix
                 .append("\n\n");
 
         List<String> keys = new ArrayList<>(I18n.LANGS.keySet());
@@ -71,19 +80,19 @@ public class LanguageCommand extends Command implements IModerationCommand {
 
         for (String key : keys) {
             I18n.FredBoatLocale loc = I18n.LANGS.get(key);
-            mb.append("**`" + loc.getCode() + "`** - " + loc.getNativeName());
+            mb.append("**`").append(loc.getCode()).append("`** - ").append(loc.getNativeName());
             mb.append("\n");
         }
 
         mb.append("\n");
-        mb.append(I18n.get(guild).getString("langDisclaimer"));
+        mb.append(context.i18n("langDisclaimer"));
 
-        channel.sendMessage(mb.build()).queue();
+        context.reply(mb.build());
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1} OR {0}{1} <code>\n#";
-        return usage + I18n.get(guild).getString("helpLanguageCommand");
+    public String help(@Nonnull Context context) {
+        return "{0}{1} OR {0}{1} <code>\n#" + context.i18n("helpLanguageCommand");
     }
 }

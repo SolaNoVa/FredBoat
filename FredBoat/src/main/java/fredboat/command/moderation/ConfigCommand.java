@@ -25,93 +25,100 @@
 
 package fredboat.command.moderation;
 
-import fredboat.Config;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IModerationCommand;
 import fredboat.db.EntityReader;
 import fredboat.db.EntityWriter;
 import fredboat.db.entity.GuildConfig;
-import fredboat.feature.I18n;
-import fredboat.util.DiscordUtil;
-import fredboat.util.TextUtils;
+import fredboat.messaging.CentralMessaging;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.perms.PermsUtil;
 import net.dv8tion.jda.core.MessageBuilder;
-import net.dv8tion.jda.core.Permission;
-import net.dv8tion.jda.core.entities.Guild;
 import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
-public class ConfigCommand extends Command implements IModerationCommand {
+public class ConfigCommand extends Command implements IModerationCommand, ICommandRestricted {
+
+    public ConfigCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        if(args.length == 1) {
-            printConfig(guild, channel, invoker, message, args);
+    public void onInvoke(@Nonnull CommandContext context) {
+        if (!context.hasArguments()) {
+            printConfig(context);
         } else {
-            setConfig(guild, channel, invoker, message, args);
+            setConfig(context);
         }
     }
 
-    private void printConfig(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildConfig gc = EntityReader.getGuildConfig(guild.getId());
+    private void printConfig(CommandContext context) {
+        GuildConfig gc = EntityReader.getGuildConfig(context.guild.getId());
 
-        MessageBuilder mb = new MessageBuilder()
-                .append(MessageFormat.format(I18n.get(guild).getString("configNoArgs") + "\n", guild.getName()))
+        MessageBuilder mb = CentralMessaging.getClearThreadLocalMessageBuilder()
+                .append(context.i18nFormat("configNoArgs", context.guild.getName())).append("\n")
                 .append("track_announce = ").append(gc.isTrackAnnounce()).append("\n")
                 .append("auto_resume = ").append(gc.isAutoResume()).append("\n")
-                .append("```");
+                .append("```"); //opening ``` is part of the configNoArgs language string
 
-        channel.sendMessage(mb.build()).queue();
+        context.reply(mb.build());
     }
 
-    private void setConfig(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        if (!invoker.hasPermission(Permission.ADMINISTRATOR)
-                && !DiscordUtil.isUserBotOwner(invoker.getUser())){
-            channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("configNotAdmin"), invoker.getEffectiveName())).queue();
+    private void setConfig(CommandContext context) {
+        Member invoker = context.invoker;
+        if (!PermsUtil.checkPermsWithFeedback(PermissionLevel.ADMIN, context)) {
             return;
         }
 
-        if(args.length != 3) {
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+        if (context.args.length != 2) {
+            HelpCommand.sendFormattedCommandHelp(context);
             return;
         }
 
-        GuildConfig gc = EntityReader.getGuildConfig(guild.getId());
-        String key = args[1];
-        String val = args[2];
+        GuildConfig gc = EntityReader.getGuildConfig(context.guild.getId());
+        String key = context.args[0];
+        String val = context.args[1];
 
         switch (key) {
             case "track_announce":
                 if (val.equalsIgnoreCase("true") | val.equalsIgnoreCase("false")) {
                     gc.setTrackAnnounce(Boolean.valueOf(val));
-                    TextUtils.replyWithName(channel, invoker, "`track_announce` " + MessageFormat.format(I18n.get(guild).getString("configSetTo"), val));
                     EntityWriter.mergeGuildConfig(gc);
+                    context.replyWithName("`track_announce` " + context.i18nFormat("configSetTo", val));
                 } else {
-                    channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("configMustBeBoolean"), invoker.getEffectiveName())).queue();
+                    context.reply(context.i18nFormat("configMustBeBoolean", invoker.getEffectiveName()));
                 }
                 break;
             case "auto_resume":
                 if (val.equalsIgnoreCase("true") | val.equalsIgnoreCase("false")) {
                     gc.setAutoResume(Boolean.valueOf(val));
-                    TextUtils.replyWithName(channel, invoker, "`auto_resume` " + MessageFormat.format(I18n.get(guild).getString("configSetTo"), val));
                     EntityWriter.mergeGuildConfig(gc);
+                    context.replyWithName("`auto_resume` " + context.i18nFormat("configSetTo", val));
                 } else {
-                    channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("configMustBeBoolean"), invoker.getEffectiveName())).queue();
+                    context.reply(context.i18nFormat("configMustBeBoolean", invoker.getEffectiveName()));
                 }
                 break;
             default:
-                channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("configUnknownKey"), invoker.getEffectiveName())).queue();
+                context.reply(context.i18nFormat("configUnknownKey", invoker.getEffectiveName()));
                 break;
         }
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         String usage = "{0}{1} OR {0}{1} <key> <value>\n#";
-        return usage + I18n.get(guild).getString("helpConfigCommand");
+        return usage + context.i18n("helpConfigCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.BASE;
     }
 }

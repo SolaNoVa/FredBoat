@@ -25,24 +25,34 @@
 
 package fredboat.util;
 
-import com.mashape.unirest.http.Unirest;
-import com.mashape.unirest.http.exceptions.UnirestException;
 import fredboat.Config;
 import fredboat.commandmeta.MessagingException;
-import fredboat.feature.I18n;
+import fredboat.messaging.CentralMessaging;
+import fredboat.messaging.internal.Context;
+import fredboat.util.rest.Http;
 import net.dv8tion.jda.core.MessageBuilder;
 import net.dv8tion.jda.core.entities.Member;
 import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import org.json.JSONException;
 import org.slf4j.LoggerFactory;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.io.IOException;
+import java.text.DecimalFormat;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class TextUtils {
 
     private static final Pattern TIMESTAMP_PATTERN = Pattern.compile("^(\\d?\\d)(?::([0-5]?\\d))?(?::([0-5]?\\d))?$");
+    public static final DateTimeFormatter TIME_IN_CENTRAL_EUROPE = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss z")
+            .withZone(ZoneId.of("Europe/Copenhagen"));
+
+    public static final char ZERO_WIDTH_CHAR = '\u200b';
 
     private static final org.slf4j.Logger log = LoggerFactory.getLogger(TextUtils.class);
 
@@ -51,88 +61,90 @@ public class TextUtils {
 
     public static Message prefaceWithName(Member member, String msg) {
         msg = ensureSpace(msg);
-
-        MessageBuilder builder = new MessageBuilder().append(member.getEffectiveName()).append(": ").append(msg);
-        return builder.build();
+        return CentralMessaging.getClearThreadLocalMessageBuilder()
+                .append(member.getEffectiveName())
+                .append(": ")
+                .append(msg)
+                .build();
     }
 
-    public static Message replyWithName(TextChannel channel, Member member, String msg) {
+    public static Message prefaceWithMention(Member member, String msg) {
         msg = ensureSpace(msg);
-
-        MessageBuilder builder = new MessageBuilder().append(member.getEffectiveName()).append(": ").append(msg);
-        Message mes = builder.build();
-        channel.sendMessage(mes).queue();
-        return mes;
+        return CentralMessaging.getClearThreadLocalMessageBuilder()
+                .append(member.getAsMention())
+                .append(": ")
+                .append(msg)
+                .build();
     }
 
     private static String ensureSpace(String msg){
         return msg.charAt(0) == ' ' ? msg : " " + msg;
     }
 
-    public static void handleException(Throwable e, TextChannel channel) {
-        handleException(e, channel, null);
-    }
-
-    public static void handleException(Throwable e, TextChannel channel, Member invoker) {
+    public static void handleException(Throwable e, Context context) {
         if (e instanceof MessagingException) {
-            channel.sendMessage(invoker.getEffectiveName() + ": " + e.getMessage()).queue();
+            context.replyWithName(e.getMessage());
             return;
         }
 
         log.error("Caught exception while executing a command", e);
 
-        MessageBuilder builder = new MessageBuilder();
+        MessageBuilder builder = CentralMessaging.getClearThreadLocalMessageBuilder();
 
-        if (invoker != null) {
-            builder.append(invoker);
-
-            String filtered = MessageFormat.format(I18n.get(invoker.getGuild()).getString("utilErrorOccurred"), e.toString());
-
-            for (String str : Config.CONFIG.getGoogleKeys()) {
-                filtered = filtered.replace(str, "GOOGLE_SERVER_KEY");
-            }
-
-            builder.append(filtered);
-        } else {
-            String filtered = MessageFormat.format(I18n.DEFAULT.getProps().getString("utilErrorOccurred"), e.toString());
-
-            for (String str : Config.CONFIG.getGoogleKeys()) {
-                filtered = filtered.replace(str, "GOOGLE_SERVER_KEY");
-            }
-
-            builder.append(filtered);
+        if (context.getMember() != null) {
+            builder.append(context.getMember());
         }
 
-        //builder.append("```java\n");
+        String filtered = context.i18nFormat("utilErrorOccurred", e.toString());
+        for (String str : Config.CONFIG.getGoogleKeys()) {
+            filtered = filtered.replace(str, "GOOGLE_SERVER_KEY");
+        }
+        builder.append(filtered);
+
         for (StackTraceElement ste : e.getStackTrace()) {
-            builder.append("\t" + ste.toString() + "\n");
+            builder.append("\t").append(ste.toString()).append("\n");
             if ("prefixCalled".equals(ste.getMethodName())) {
                 break;
             }
         }
-        builder.append("\t...```");
-
-        Message out = builder.build();
+        builder.append("\t...```"); //opening ``` is part of the utilErrorOccurred language string
 
         try {
-            channel.sendMessage(out).queue();
-        } catch (UnsupportedOperationException tooLongEx) {
-            try {channel.sendMessage(MessageFormat.format(I18n.get(channel.getGuild()).getString("errorOccurredTooLong"), postToHastebin(out.getRawContent()))).queue();
-            } catch (UnirestException e1) {
-                channel.sendMessage(I18n.get(channel.getGuild()).getString("errorOccurredTooLongAndUnirestException")).queue();
+            context.reply(builder.build());
+        } catch (UnsupportedOperationException | IllegalStateException tooLongEx) {
+            try {
+                context.reply(context.i18nFormat("errorOccurredTooLong",
+                        postToPasteService(builder.getStringBuilder().toString())));
+            } catch (IOException | JSONException e1) {
+                log.error("Failed to upload to any pasteservice.");
+                context.reply(context.i18n("errorOccurredTooLongAndUnirestException"));
             }
         }
     }
 
-    public static String postToHastebin(String body) throws UnirestException {
-        return Unirest.post("https://hastebin.com/documents").body(body).asJson().getBody().getObject().getString("key");
+    private static String postToHastebin(String body) throws IOException {
+        return Http.post("https://hastebin.com/documents", body, "text/plain")
+                .asJson()
+                .getString("key");
     }
 
-    public static String postToHastebin(String body, boolean asURL) throws UnirestException {
-        if (asURL) {
+    private static String postToWastebin(String body) throws IOException {
+        return Http.post("https://wastebin.party/documents", body, "text/plain")
+                .asJson()
+                .getString("key");
+    }
+
+    /**
+     * @param body the content that should be uploaded to a paste service
+     * @return the url of the uploaded paste
+     * @throws IOException if none of the paste services allowed a successful upload
+     */
+    public static String postToPasteService(String body) throws IOException, JSONException {
+        try {
             return "https://hastebin.com/" + postToHastebin(body);
-        } else {
-            return postToHastebin(body);
+        } catch (IOException | JSONException e) {
+            log.warn("Could not post to hastebin, trying backup", e);
+            return "https://wastebin.party/" + postToWastebin(body);
         }
     }
 
@@ -159,6 +171,19 @@ public class TextUtils {
 
     private static String forceTwoDigits(int i) {
         return i < 10 ? "0" + i : Integer.toString(i);
+    }
+
+    private static final DecimalFormat percentageFormat = new DecimalFormat("###.##");
+
+    public static String roundToTwo(double value) {
+        long factor = (long) Math.pow(10, 2);
+        value = value * factor;
+        long tmp = Math.round(value);
+        return percentageFormat.format((double) tmp / factor);
+    }
+
+    public static String formatPercent(double percent) {
+        return roundToTwo(percent * 100) + "%";
     }
 
     public static String substringPreserveWords(String str, int len){
@@ -212,8 +237,10 @@ public class TextUtils {
         return millis;
     }
 
-    public static String asMarkdown(String str) {
-        return "```md\n" + str + "```";
+    //optional provide a style, for example diff or md
+    public static String asCodeBlock(String str, String... style) {
+        String sty = style != null && style.length > 0 ? style[0] : "";
+        return "```" + sty + "\n" + str + "\n```";
     }
 
     public static String forceNDigits(int i, int n) {
@@ -224,5 +251,37 @@ public class TextUtils {
         }
 
         return str;
+    }
+
+    public static String padWithSpaces(@Nullable String str, int totalLength, boolean front) {
+        StringBuilder result = new StringBuilder(str != null ? str : "");
+        while (result.length() < totalLength) {
+            if (front) {
+                result.insert(0, " ");
+            } else {
+                result.append(" ");
+            }
+        }
+        return result.toString();
+    }
+
+    /**
+     * Helper method to check for string that matches ONLY contain digit(s), comma(s) or space(s).
+     *
+     * @param arg String of the argument.
+     * @return True if it matches, false if empty string or not match.
+     */
+    public static boolean isSplitSelect(@Nonnull String arg) {
+        String temp = arg.replaceAll(" +", " ");
+
+        return arg.length() > 0 && temp.matches("(\\d*,*\\s*)*");
+    }
+    
+    public static String getTimeInCentralEurope() {
+        return asTimeInCentralEurope(System.currentTimeMillis());
+    }
+
+    public static String asTimeInCentralEurope(final long epochMillis) {
+        return TIME_IN_CENTRAL_EUROPE.format(Instant.ofEpochMilli(epochMillis));
     }
 }

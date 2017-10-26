@@ -25,31 +25,38 @@
 
 package fredboat.command.admin;
 
-import fredboat.audio.AbstractPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.AbstractPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
-import fredboat.commandmeta.abs.ICommandOwnerRestricted;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.util.TextUtils;
 import net.dv8tion.jda.core.JDA;
 import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
-import java.util.concurrent.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-public class EvalCommand extends Command implements ICommandOwnerRestricted {
+public class EvalCommand extends Command implements ICommandRestricted {
 
     private static final Logger log = LoggerFactory.getLogger(EvalCommand.class);
 
     //Thanks Dinos!
     private ScriptEngine engine;
 
-    public EvalCommand() {
+    public EvalCommand(String name, String... aliases) {
+        super(name, aliases);
         engine = new ScriptEngineManager().getEngineByName("nashorn");
         try {
             engine.eval("var imports = new JavaImporter(java.io, java.lang, java.util);");
@@ -60,29 +67,30 @@ public class EvalCommand extends Command implements ICommandOwnerRestricted {
     }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member author, Message message, String[] args) {
+    public void onInvoke(@Nonnull CommandContext context) {
+        Guild guild = context.guild;
         JDA jda = guild.getJDA();
+        context.sendTyping();
 
-        channel.sendTyping().queue();
-
-        final String source = message.getRawContent().substring(args[0].length() + 1);
+        final String source = context.rawArgs;
 
         engine.put("jda", jda);
         engine.put("api", jda);
-        engine.put("channel", channel);
-        engine.put("vc", PlayerRegistry.getExisting(guild) != null ? PlayerRegistry.getExisting(guild).getChannel() : null);
-        engine.put("author", author);
+        engine.put("channel", context.channel);
+        engine.put("vc", PlayerRegistry.getExisting(guild) != null ? PlayerRegistry.getExisting(guild).getCurrentVoiceChannel() : null);
+        engine.put("author", context.invoker);
         engine.put("bot", jda.getSelfUser());
         engine.put("member", guild.getSelfMember());
-        engine.put("message", message);
+        engine.put("message", context.msg);
         engine.put("guild", guild);
         engine.put("player", PlayerRegistry.getExisting(guild));
         engine.put("pm", AbstractPlayer.getPlayerManager());
+        engine.put("context", context);
 
         ScheduledExecutorService service = Executors.newScheduledThreadPool(1);
         ScheduledFuture<?> future = service.schedule(() -> {
 
-            Object out = null;
+            Object out;
             try {
                 out = engine.eval(
                         "(function() {"
@@ -90,8 +98,8 @@ public class EvalCommand extends Command implements ICommandOwnerRestricted {
                         + "})();");
 
             } catch (Exception ex) {
-                channel.sendMessage("`"+ex.getMessage()+"`").queue();
-                log.error("Error occurred in eval", ex);
+                context.reply("`" + ex.getMessage() + "`");
+                log.info("Error occurred in eval", ex);
                 return;
             }
 
@@ -99,12 +107,12 @@ public class EvalCommand extends Command implements ICommandOwnerRestricted {
             if (out == null) {
                 outputS = ":ok_hand::skin-tone-3:";
             } else if (out.toString().contains("\n")) {
-                outputS = "\nEval: ```\n" + out.toString() + "```";
+                outputS = "\nEval: " + TextUtils.asCodeBlock(out.toString());
             } else {
                 outputS = "\nEval: `" + out.toString() + "`";
             }
 
-            channel.sendMessage("```java\n"+source+"```" + "\n" + outputS).queue();
+            context.reply(TextUtils.asCodeBlock(source, "java") + "\n" + outputS);
 
         }, 0, TimeUnit.MILLISECONDS);
 
@@ -116,17 +124,24 @@ public class EvalCommand extends Command implements ICommandOwnerRestricted {
 
                 } catch (TimeoutException ex) {
                     future.cancel(true);
-                    channel.sendMessage("Task exceeded time limit.").queue();
+                    context.reply("Task exceeded time limit.");
                 } catch (Exception ex) {
-                    channel.sendMessage("`"+ex.getMessage()+"`").queue();
+                    context.reply("`" + ex.getMessage() + "`");
                 }
             }
         };
         script.start();
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1} <Java-code>\\n#Run the provided Java code.";
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.BOT_OWNER;
     }
 }

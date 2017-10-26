@@ -25,38 +25,29 @@
 
 package fredboat.command.fun;
 
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IFunCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.MessageBuilder;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
 public class RollCommand extends RandomImageCommand implements IFunCommand {
 
-    public RollCommand(String[] urls) {
-        super(urls);
-    }
-
-    public RollCommand(String imgurAlbumUrl) {
-        super(imgurAlbumUrl);
+    public RollCommand(String imgurAlbumUrl, String name, String... aliases) {
+        super(imgurAlbumUrl, name, aliases);
     }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        Message ourMessage = new MessageBuilder()
-                .append("_")
-                .append(MessageFormat.format(I18n.get(guild).getString("rollSuccess"), invoker.getAsMention()))
-                .append("_")
-                .build();
-        super.sendRandomFileWithMessage(channel, ourMessage);
+    public void onInvoke(@Nonnull CommandContext context) {
+        String rollMessage = "_"
+                + context.i18nFormat("rollSuccess", context.invoker.getAsMention())
+                + "_";
+        context.replyImage(super.getRandomImageUrl(), rollMessage);
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1}\n#Roll around.";
     }
 }

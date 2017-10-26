@@ -27,48 +27,54 @@ package fredboat.command.admin;
 
 import fredboat.FredBoat;
 import fredboat.commandmeta.abs.Command;
-import fredboat.commandmeta.abs.ICommandOwnerRestricted;
-import fredboat.util.ExitCodes;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.shared.constant.ExitCodes;
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
-public class UpdateCommand extends Command implements ICommandOwnerRestricted {
+public class UpdateCommand extends Command implements ICommandRestricted {
 
     private static final Logger log = LoggerFactory.getLogger(UpdateCommand.class);
-    private static final CompileCommand COMPILE_COMMAND = new CompileCommand();
+    private static final CompileCommand COMPILE_COMMAND = new CompileCommand("");
     private static final long MAX_JAR_AGE = 10 * 60 * 1000;
 
+    public UpdateCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
+
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
+    public void onInvoke(@Nonnull CommandContext context) {
         try {
             File homeJar = new File(System.getProperty("user.home") + "/FredBoat-1.0.jar");
 
             //Must exist and not be too old
             if(homeJar.exists()
                     && (System.currentTimeMillis() - homeJar.lastModified()) < MAX_JAR_AGE){
-                update(channel);
+                update(context);
                 return;
             } else {
                 log.info("");
             }
 
-            COMPILE_COMMAND.onInvoke(guild, channel, invoker, message, args);
+            COMPILE_COMMAND.onInvoke(context);
 
-            update(channel);
+            update(context);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void update(TextChannel channel) throws IOException {
+    private void update(CommandContext context) throws IOException {
         File homeJar = new File(System.getProperty("user.home") + "/FredBoat-1.0.jar");
         File targetJar = new File("./update/target/FredBoat-1.0.jar");
 
@@ -77,12 +83,22 @@ public class UpdateCommand extends Command implements ICommandOwnerRestricted {
         FileUtils.copyFile(homeJar, targetJar);
 
         //Shutdown for update
-        channel.sendMessage("Now restarting...").queue();
+        try {
+            context.reply("Now restarting...").getWithDefaultTimeout();
+        } catch (TimeoutException | InterruptedException | ExecutionException ignored) {
+        }
         FredBoat.shutdown(ExitCodes.EXIT_CODE_UPDATE);
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1} [branch [repo]]\n#Update the bot by checking out the provided branch from the provided github repo and compiling it. Default github repo is Frederikam, default branch is master. Restart with the fresh build.";
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.BOT_OWNER;
     }
 }

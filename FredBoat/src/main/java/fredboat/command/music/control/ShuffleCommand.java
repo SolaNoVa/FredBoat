@@ -25,33 +25,44 @@
 
 package fredboat.command.music.control;
 
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 
-public class ShuffleCommand extends Command implements IMusicCommand {
+import javax.annotation.Nonnull;
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
-        player.setShuffle(!player.isShuffle());
+public class ShuffleCommand extends Command implements IMusicCommand, ICommandRestricted {
 
-        if (player.isShuffle()) {
-            channel.sendMessage(I18n.get(guild).getString("shuffleOn")).queue();
-        } else {
-            channel.sendMessage(I18n.get(guild).getString("shuffleOff")).queue();
-        }
+    public ShuffleCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpShuffleCommand");
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+        player.setShuffle(!player.isShuffle());
+
+        if (player.isShuffle()) {
+            context.reply(context.i18n("shuffleOn"));
+        } else {
+            context.reply(context.i18n("shuffleOff"));
+        }
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpShuffleCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

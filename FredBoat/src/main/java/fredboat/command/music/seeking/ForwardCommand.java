@@ -26,45 +26,45 @@
 package fredboat.command.music.seeking;
 
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
-import fredboat.Config;
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.audio.queue.AudioTrackContext;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
-public class ForwardCommand extends Command implements IMusicCommand {
+public class ForwardCommand extends Command implements IMusicCommand, ICommandRestricted {
+
+    public ForwardCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.getExisting(guild);
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getExisting(context.guild);
 
         if(player == null || player.isQueueEmpty()) {
-            TextUtils.replyWithName(channel, invoker, I18n.get(guild).getString("unpauseQueueEmpty"));
+            context.replyWithName(context.i18n("unpauseQueueEmpty"));
             return;
         }
 
-        if(args.length == 1) {
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+        if (!context.hasArguments()) {
+            HelpCommand.sendFormattedCommandHelp(context);
             return;
         }
 
         long t;
         try {
-            t = TextUtils.parseTimeString(args[1]);
+            t = TextUtils.parseTimeString(context.args[0]);
         } catch (IllegalStateException e){
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+            HelpCommand.sendFormattedCommandHelp(context);
             return;
         }
 
@@ -75,14 +75,21 @@ public class ForwardCommand extends Command implements IMusicCommand {
         t = Math.max(0, t);
         t = Math.min(atc.getEffectiveDuration(), t);
 
-        at.setPosition(at.getPosition() + t);
-        channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("fwdSuccess"), atc.getEffectiveTitle(), TextUtils.formatTime(t))).queue();
+        player.seekTo(player.getPosition() + t);
+        context.reply(context.i18nFormat("fwdSuccess", atc.getEffectiveTitle(), TextUtils.formatTime(t)));
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         String usage = "{0}{1} [[hh:]mm:]ss\n#";
         String example = "  {0}{1} 2:30";
-        return usage + I18n.get(guild).getString("helpForwardCommand") + example;
+        return usage + context.i18n("helpForwardCommand") + example;
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

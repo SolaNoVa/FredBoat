@@ -26,7 +26,11 @@
 package fredboat.commandmeta;
 
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.messaging.internal.Context;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Set;
 
@@ -34,16 +38,17 @@ public class CommandRegistry {
 
     private static HashMap<String, CommandEntry> registry = new HashMap<>();
 
-    public static void registerCommand(String name, Command command) {
+    public static void registerCommand(@Nonnull Command command) {
+        String name = command.name.toLowerCase();
         CommandEntry entry = new CommandEntry(command, name);
         registry.put(name, entry);
-    }
-    
-    public static void registerAlias(String command, String alias) {
-        registry.put(alias, registry.get(command));
+        for (String alias : command.aliases) {
+            registry.put(alias.toLowerCase(), entry);
+        }
     }
 
-    public static CommandEntry getCommand(String name) {
+    @Nullable
+    public static CommandEntry getCommand(@Nonnull String name) {
         return registry.get(name);
     }
 
@@ -53,6 +58,23 @@ public class CommandRegistry {
 
     public static Set<String> getRegisteredCommandsAndAliases() {
         return registry.keySet();
+    }
+
+    public static void removeCommand(String name) {
+        CommandEntry entry = new CommandEntry(new Command(name) {
+            @Override
+            public void onInvoke(@Nonnull CommandContext context) {
+                context.reply("This command is temporarily disabled");
+            }
+
+            @Nonnull
+            @Override
+            public String help(@Nonnull Context context) {
+                return "Temporarily disabled command";
+            }
+        }, name);
+
+        registry.put(name, entry);
     }
 
     public static class CommandEntry {

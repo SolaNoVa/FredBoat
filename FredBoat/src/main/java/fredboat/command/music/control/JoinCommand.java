@@ -25,41 +25,51 @@
 
 package fredboat.command.music.control;
 
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.entities.*;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import net.dv8tion.jda.core.entities.VoiceChannel;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
-public class JoinCommand extends Command implements IMusicCommand {
+public class JoinCommand extends Command implements IMusicCommand, ICommandRestricted {
+
+    public JoinCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
-        VoiceChannel vc = player.getUserCurrentVoiceChannel(invoker);
-        player.setCurrentTC(channel);
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+        VoiceChannel vc = player.getUserCurrentVoiceChannel(context.invoker);
         try {
             player.joinChannel(vc);
             if (vc != null) {
-                channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("joinJoining"), vc.getName()))
-                        .queue();
+                context.reply(context.i18nFormat("joinJoining", vc.getName()));
             }
         } catch (IllegalStateException ex) {
             if(vc != null) {
-                channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("joinErrorAlreadyJoining"), vc.getName()))
-                        .queue();
+                context.reply(context.i18nFormat("joinErrorAlreadyJoining", vc.getName()));
             } else {
                 throw ex;
             }
         }
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpJoinCommand");
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpJoinCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.USER;
     }
 }

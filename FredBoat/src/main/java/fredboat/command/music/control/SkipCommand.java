@@ -25,83 +25,119 @@
 
 package fredboat.command.music.control;
 
-import fredboat.Config;
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.audio.queue.AudioTrackContext;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.perms.PermsUtil;
 import fredboat.util.TextUtils;
 import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import net.dv8tion.jda.core.entities.User;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.Pair;
 
-import java.text.MessageFormat;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import javax.annotation.Nonnull;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class SkipCommand extends Command implements IMusicCommand {
+public class SkipCommand extends Command implements IMusicCommand, ICommandRestricted {
     private static final String TRACK_RANGE_REGEX = "^(0?\\d+)-(0?\\d+)$";
     private static final Pattern trackRangePattern = Pattern.compile(TRACK_RANGE_REGEX);
 
+    public SkipCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
+
+    /**
+     * Represents the relationship between a <b>guild's id</b> and <b>skip cooldown</b>.
+     */
+    private static Map<String, Long> guildIdToLastSkip = new HashMap<String, Long>();
+
+    /**
+     * The default cooldown for calling the {@link #onInvoke} method in milliseconds.
+     */
+    private static final int SKIP_COOLDOWN = 500;
+
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
-        player.setCurrentTC(channel);
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+
         if (player.isQueueEmpty()) {
-            channel.sendMessage(I18n.get(guild).getString("skipEmpty")).queue();
+            context.reply(context.i18n("skipEmpty"));
             return;
         }
 
-        if(args.length == 1){
-            skipNext(guild, channel, invoker, args);
-        } else if (args.length == 2 && StringUtils.isNumeric(args[1])) {
-            skipGivenIndex(player, channel, invoker, args);
-        } else if (args.length == 2 && trackRangePattern.matcher(args[1]).matches()){
-            skipInRange(player, channel, invoker, args);
+        if (isOnCooldown(context.guild)) {
+            return;
         } else {
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+            guildIdToLastSkip.put(context.guild.getId(), System.currentTimeMillis());
+        }
+
+        if (!context.hasArguments()) {
+            skipNext(context);
+        } else if (context.hasArguments() && StringUtils.isNumeric(context.args[0])) {
+            skipGivenIndex(player, context);
+        } else if (context.hasArguments() && trackRangePattern.matcher(context.args[0]).matches()) {
+            skipInRange(player, context);
+        } else if (!context.getMentionedUsers().isEmpty()) {
+            skipUser(player, context, context.getMentionedUsers());
+        } else {
+            HelpCommand.sendFormattedCommandHelp(context);
         }
     }
 
-    private void skipGivenIndex(GuildPlayer player, TextChannel channel, Member invoker, String[] args) {
-        int givenIndex = Integer.parseInt(args[1]);
-
-        if(givenIndex == 1){
-            skipNext(channel.getGuild(), channel, invoker, args);
-            return;
-        }
-
-        if(player.getRemainingTracks().size() < givenIndex){
-            channel.sendMessage(MessageFormat.format(I18n.get(channel.getGuild()).getString("skipOutOfBounds"), givenIndex, player.getRemainingTracks().size())).queue();
-            return;
-        } else if (givenIndex < 1){
-            channel.sendMessage(I18n.get(channel.getGuild()).getString("skipNumberTooLow")).queue();
-            return;
-        }
-
-        AudioTrackContext atc = player.getAudioTrackProvider().getAsListOrdered().get(givenIndex - 2);
-        player.skipTracksForMemberPerms(channel, invoker, atc);
-
-        Pair<Boolean, String> result = player.skipTracksForMemberPerms(channel, invoker, atc);
-        if(result.getLeft()) {
-            channel.sendMessage(MessageFormat.format(I18n.get(channel.getGuild()).getString("skipSuccess"), givenIndex, atc.getEffectiveTitle())).queue();
-        }
+    /**
+     * Specifies whether the <B>skip command </B>is on cooldown.
+     *
+     * @param guild The guild where the <B>skip command</B> was called.
+     * @return {@code true} if the elapsed time since the <B>skip command</B> is less than or equal to
+     * {@link #SKIP_COOLDOWN}; otherwise, {@code false}.
+     */
+    private boolean isOnCooldown(Guild guild) {
+        long currentTIme = System.currentTimeMillis();
+        return currentTIme - guildIdToLastSkip.getOrDefault(guild.getId(), 0L) <= SKIP_COOLDOWN;
     }
 
-    private void skipInRange(GuildPlayer player, TextChannel channel, Member invoker, String[] args) {
-        Matcher trackMatch = trackRangePattern.matcher(args[1]);
+    private void skipGivenIndex(GuildPlayer player, CommandContext context) {
+        int givenIndex;
+        try {
+            givenIndex = Integer.parseInt(context.args[0]);
+        } catch (NumberFormatException e) {
+            context.reply(context.i18nFormat("skipOutOfBounds", context.args[0], player.getTrackCount()));
+            return;
+        }
+
+        if (givenIndex == 1) {
+            skipNext(context);
+            return;
+        }
+
+        if (player.getRemainingTracks().size() < givenIndex) {
+            context.reply(context.i18nFormat("skipOutOfBounds", givenIndex, player.getTrackCount()));
+            return;
+        } else if (givenIndex < 1) {
+            context.reply(context.i18n("skipNumberTooLow"));
+            return;
+        }
+
+        AudioTrackContext atc = player.getTracksInRange(givenIndex - 1, givenIndex).get(0);
+
+        String successMessage = context.i18nFormat("skipSuccess", givenIndex, atc.getEffectiveTitle());
+        player.skipTracksForMemberPerms(context, Collections.singletonList(atc.getTrackId()), successMessage);
+    }
+
+    private void skipInRange(GuildPlayer player, CommandContext context) {
+        Matcher trackMatch = trackRangePattern.matcher(context.args[0]);
         if (!trackMatch.find()) return;
 
-        int startTrackIndex, endTrackIndex;
+        int startTrackIndex;
+        int endTrackIndex;
         String tmp = "";
         try {
             tmp = trackMatch.group(1);
@@ -109,53 +145,106 @@ public class SkipCommand extends Command implements IMusicCommand {
             tmp = trackMatch.group(2);
             endTrackIndex = Integer.parseInt(tmp);
         } catch (NumberFormatException e) {
-            channel.sendMessage(MessageFormat.format(I18n.get(channel.getGuild()).getString("skipOutOfBounds"), tmp, player.getRemainingTracks().size())).queue();
+            context.reply(context.i18nFormat("skipOutOfBounds", tmp, player.getTrackCount()));
             return;
         }
 
         if (startTrackIndex < 1) {
-            channel.sendMessage(I18n.get(channel.getGuild()).getString("skipNumberTooLow")).queue();
+            context.reply(context.i18n("skipNumberTooLow"));
             return;
         } else if (endTrackIndex < startTrackIndex) {
-            channel.sendMessage(I18n.get(channel.getGuild()).getString("skipRangeInvalid")).queue();
+            context.reply(context.i18n("skipRangeInvalid"));
             return;
-        } else if (player.getRemainingTracks().size() < endTrackIndex) {
-            channel.sendMessage(MessageFormat.format(I18n.get(channel.getGuild()).getString("skipOutOfBounds"), endTrackIndex, player.getRemainingTracks().size())).queue();
+        } else if (player.getTrackCount() < endTrackIndex) {
+            context.reply(context.i18nFormat("skipOutOfBounds", endTrackIndex, player.getTrackCount()));
             return;
         }
 
-        List<AudioTrackContext> tracks = new ArrayList<>();
-        if (startTrackIndex == 1) {
-            //Add the currently playing track
-            tracks.add(player.getPlayingTrack());
-        }
-        tracks.addAll(player.getAudioTrackProvider().getInRange(startTrackIndex - 2, endTrackIndex - 2));
+        List<Long> trackIds = player.getTrackIdsInRange(startTrackIndex - 1, endTrackIndex);
 
-        Pair<Boolean, String> pair = player.skipTracksForMemberPerms(channel, invoker, tracks);
-
-        if(pair.getLeft()) {
-            channel.sendMessage(MessageFormat.format(I18n.get(channel.getGuild()).getString("skipRangeSuccess"),
-                    TextUtils.forceNDigits(startTrackIndex, 2),
-                    TextUtils.forceNDigits(endTrackIndex, 2))).queue();
-        }
+        String successMessage = context.i18nFormat("skipRangeSuccess",
+                TextUtils.forceNDigits(startTrackIndex, 2),
+                TextUtils.forceNDigits(endTrackIndex, 2));
+        player.skipTracksForMemberPerms(context, trackIds, successMessage);
     }
 
-    private void skipNext(Guild guild, TextChannel channel, Member invoker, String[] args){
-        GuildPlayer player = PlayerRegistry.get(guild);
-        AudioTrackContext atc = player.getPlayingTrack();
-        if(atc == null) {
-            channel.sendMessage(I18n.get(guild).getString("skipTrackNotFound")).queue();
-        } else {
-            Pair<Boolean, String> result = player.skipTracksForMemberPerms(channel, invoker, atc);
-            if(result.getLeft()) {
-                channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("skipSuccess"), 1, atc.getEffectiveTitle())).queue();
+    private void skipUser(GuildPlayer player, CommandContext context, List<User> users) {
+
+        if (!PermsUtil.checkPerms(PermissionLevel.DJ, context.invoker)) {
+
+            if (users.size() == 1) {
+                User user = users.get(0);
+
+                if (context.invoker.getUser().getIdLong() != user.getIdLong()) {
+                    context.reply(context.i18n("skipDeniedTooManyTracks"));
+                    return;
+                }
+
+            } else {
+                context.reply(context.i18n("skipDeniedTooManyTracks"));
+                return;
             }
         }
+
+        List<AudioTrackContext> listAtc = player.getTracksInRange(0, player.getTrackCount());
+        List<Long> userAtcIds = new ArrayList<>();
+        List<User> affectedUsers = new ArrayList<>();
+
+        for (User user : users) {
+            for (AudioTrackContext atc : listAtc) {
+                if (atc.getUserId() == user.getIdLong()) {
+                    userAtcIds.add(atc.getTrackId());
+
+                    if (!affectedUsers.contains(user)) {
+                        affectedUsers.add(user);
+                    }
+                }
+            }
+        }
+
+
+        if (userAtcIds.size() > 0) {
+
+            String title = player.getPlayingTrack().getEffectiveTitle();
+            player.skipTracks(userAtcIds);
+
+            if (affectedUsers.size() > 1) {
+                context.reply(context.i18nFormat("skipUsersMultiple", ("`" + userAtcIds.size() + "`"), ("**" + affectedUsers.size() + "**")));
+            } else {
+                User user = affectedUsers.get(0);
+                String userName = "**" + user.getName() + "#" + user.getDiscriminator() + "**";
+                if (userAtcIds.size() == 1) {
+                    context.reply(context.i18nFormat("skipUserSingle", "**" + title + "**", userName));
+                } else {
+                    context.reply(context.i18nFormat("skipUserMultiple", "`" + userAtcIds.size() + "`", userName));
+                }
+            }
+        } else {
+            context.reply(context.i18n("skipUserNoTracks"));
+        }
     }
 
+    private void skipNext(CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+        AudioTrackContext atc = player.getPlayingTrack();
+        if (atc == null) {
+            context.reply(context.i18n("skipTrackNotFound"));
+        } else {
+            String successMessage = context.i18nFormat("skipSuccess", 1, atc.getEffectiveTitle());
+            player.skipTracksForMemberPerms(context, Collections.singletonList(atc.getTrackId()), successMessage);
+        }
+    }
+
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1} OR {0}{1} n OR {0}{1} n-m\n#";
-        return usage + I18n.get(guild).getString("helpSkipCommand");
+    public String help(@Nonnull Context context) {
+        String usage = "{0}{1} OR {0}{1} n OR {0}{1} n-m OR {0}{1} @Users...\n#";
+        return usage + context.i18n("helpSkipCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.USER;
     }
 }

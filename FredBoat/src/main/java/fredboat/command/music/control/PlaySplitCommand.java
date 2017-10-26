@@ -25,47 +25,55 @@
 
 package fredboat.command.music.control;
 
-import fredboat.Config;
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerLimitManager;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.audio.queue.IdentifierContext;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 
-public class PlaySplitCommand extends Command implements IMusicCommand {
+import javax.annotation.Nonnull;
 
+public class PlaySplitCommand extends Command implements IMusicCommand, ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        if (args.length < 2) {
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
-            return;
-        }
-
-        IdentifierContext ic = new IdentifierContext(args[1], channel, invoker);
-        ic.setSplit(true);
-
-        GuildPlayer player = PlayerRegistry.get(guild);
-        player.queue(ic);
-        player.setPause(false);
-
-        try {
-            message.delete().queue();
-        } catch (Exception ignored) {
-
-        }
+    public PlaySplitCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1} <url>\n#";
-        return usage + I18n.get(guild).getString("helpPlaySplitCommand");
+    public void onInvoke(@Nonnull CommandContext context) {
+
+        if (!context.hasArguments()) {
+            HelpCommand.sendFormattedCommandHelp(context);
+            return;
+        }
+
+        if (!PlayerLimitManager.checkLimitResponsive(context)) return;
+
+        IdentifierContext ic = new IdentifierContext(context.args[0], context.channel, context.invoker);
+        ic.setSplit(true);
+
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+        player.queue(ic);
+        player.setPause(false);
+
+        context.deleteMessage();
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
+        return "{0}{1} <url>\n#" + context.i18n("helpPlaySplitCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.USER;
     }
 }

@@ -27,28 +27,45 @@ package fredboat.command.admin;
 
 import fredboat.FredBoat;
 import fredboat.commandmeta.abs.Command;
-import fredboat.commandmeta.abs.ICommandOwnerRestricted;
-import fredboat.util.ExitCodes;
-import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.shared.constant.ExitCodes;
+
+import javax.annotation.Nonnull;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 /**
  *
  * @author frederik
  */
-public class ExitCommand extends Command implements ICommandOwnerRestricted {
+public class ExitCommand extends Command implements ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        channel.sendMessage(TextUtils.prefaceWithName(invoker, " :wave:")).queue();
-        FredBoat.shutdown(ExitCodes.EXIT_CODE_NORMAL);
+    public ExitCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
+    public void onInvoke(@Nonnull CommandContext context) {
+
+        try {
+            context.replyWithName(":wave:").getWithDefaultTimeout();
+        } catch (InterruptedException | ExecutionException | TimeoutException ignored) {
+        }
+        FredBoat.shutdown(ExitCodes.EXIT_CODE_NORMAL);
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
         return "{0}{1}\n#Shut down the bot.";
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.BOT_ADMIN;
     }
 }

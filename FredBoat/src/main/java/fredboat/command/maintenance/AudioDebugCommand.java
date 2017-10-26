@@ -25,41 +25,46 @@
 
 package fredboat.command.maintenance;
 
-import fredboat.audio.AudioLossCounter;
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.AudioLossCounter;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IMaintenanceCommand;
+import fredboat.messaging.internal.Context;
 import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+
+import javax.annotation.Nonnull;
 
 public class AudioDebugCommand extends Command implements IMaintenanceCommand {
 
+    public AudioDebugCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
+
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
+    public void onInvoke(@Nonnull CommandContext context) {
         String msg = "";
-        GuildPlayer guildPlayer = PlayerRegistry.getExisting(guild);
+        GuildPlayer guildPlayer = PlayerRegistry.getExisting(context.guild);
 
         if(guildPlayer == null) {
             msg = msg + "No GuildPlayer found.\n";
         } else {
             int deficit = AudioLossCounter.EXPECTED_PACKET_COUNT_PER_MIN - (guildPlayer.getAudioLossCounter().getLastMinuteLoss() + guildPlayer.getAudioLossCounter().getLastMinuteSuccess());
 
-            msg = msg + "Last minute's packet stats:```\n"
-                + "Packets sent:   " + guildPlayer.getAudioLossCounter().getLastMinuteSuccess() + "\n"
-                + "Null packets:   " + guildPlayer.getAudioLossCounter().getLastMinuteLoss() + "\n"
-                + "Packet deficit: " + deficit + "\n```";
+            msg = msg + "Last minute's packet stats:\n" + TextUtils.asCodeBlock(
+                              "Packets sent:   " + guildPlayer.getAudioLossCounter().getLastMinuteSuccess() + "\n"
+                            + "Null packets:   " + guildPlayer.getAudioLossCounter().getLastMinuteLoss() + "\n"
+                            + "Packet deficit: " + deficit);
         }
 
-        TextUtils.replyWithName(channel, invoker, msg);
+        context.replyWithName(msg);
 
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1}\n#Show audio related debug information.";
     }
 }

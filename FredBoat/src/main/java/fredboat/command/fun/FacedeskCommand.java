@@ -25,38 +25,30 @@
 
 package fredboat.command.fun;
 
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IFunCommand;
-import fredboat.feature.I18n;
-import net.dv8tion.jda.core.MessageBuilder;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
 
 public class FacedeskCommand extends RandomImageCommand implements IFunCommand {
 
-    public FacedeskCommand(String[] urls) {
-        super(urls);
-    }
-
-    public FacedeskCommand(String imgurAlbumUrl) {
-        super(imgurAlbumUrl);
+    public FacedeskCommand(String imgurAlbumUrl, String name, String... aliases) {
+        super(imgurAlbumUrl, name, aliases);
     }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        Message ourMessage = new MessageBuilder()
-                .append("_")
-                .append(MessageFormat.format(I18n.get(guild).getString("facedeskSuccess"), invoker.getAsMention()))
-                .append("_")
-                .build();
-        super.sendRandomFileWithMessage(channel, ourMessage);
+    public void onInvoke(@Nonnull CommandContext context) {
+        String facedeskMessage = "_"
+                + context.i18nFormat("facedeskSuccess", context.invoker.getAsMention())
+                + "_";
+
+        context.replyImage(super.getRandomImageUrl(), facedeskMessage);
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1}\n#Facedesk.";
     }
 }

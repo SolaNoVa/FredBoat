@@ -26,34 +26,31 @@
 package fredboat.command.fun;
 
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IFunCommand;
-import fredboat.util.CacheUtil;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.messaging.internal.Context;
+import fredboat.util.rest.CacheUtil;
 
-import java.io.IOException;
+import javax.annotation.Nonnull;
 
 public class RemoteFileCommand extends Command implements IFunCommand {
 
-    public String msg;
+    public String url;
 
-    public RemoteFileCommand(String msg) {
-        this.msg = msg;
+    public RemoteFileCommand(String url, String name, String... aliases) {
+        super(name, aliases);
+        this.url = url;
     }
 
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        try {
-            channel.sendFile(CacheUtil.getImageFromURL(msg), null).queue();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    public void onInvoke(@Nonnull CommandContext context) {
+        //NOTE: moving this to Context#replyImage breaks the ;;gif one
+        context.replyFile(CacheUtil.getImageFromURL(url), null);
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
+    public String help(@Nonnull Context context) {
         return "{0}{1}\n#Post a funny image or meme.";
     }
 }

@@ -29,47 +29,66 @@ import fredboat.Config;
 import fredboat.FredBoat;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
-import fredboat.commandmeta.abs.ICommandAdminRestricted;
-import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+
+import javax.annotation.Nonnull;
 
 /**
  *
  * @author frederik
  */
-public class ReviveCommand extends Command implements ICommandAdminRestricted {
+public class ReviveCommand extends Command implements ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-
-        int shardId;
-        try {
-            if (args[1].equals("guild")) {
-                long guildId = Long.valueOf(args[2]);
-                //https://discordapp.com/developers/docs/topics/gateway#sharding
-                shardId = (int) ((guildId >> 22) % Config.CONFIG.getNumShards());
-            } else
-                shardId = Integer.parseInt(args[1]);
-
-        } catch (NumberFormatException | IndexOutOfBoundsException e) {
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
-            return;
-        }
-
-        channel.sendMessage(TextUtils.prefaceWithName(invoker, " Reviving shard " + shardId)).queue();
-        try {
-            FredBoat.getInstance(shardId).revive();
-        } catch (IndexOutOfBoundsException e) {
-            channel.sendMessage(TextUtils.prefaceWithName(invoker, " No such shard: " + shardId)).queue();
-        }
+    public ReviveCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
+    public void onInvoke(@Nonnull CommandContext context) {
+
+        int shardId;
+
+        if (!context.hasArguments()) {
+            HelpCommand.sendFormattedCommandHelp(context);
+            return;
+        }
+
+        try {
+            if (context.args.length > 1 && context.args[0].equals("guild")) {
+                long guildId = Long.valueOf(context.args[1]);
+                //https://discordapp.com/developers/docs/topics/gateway#sharding
+                shardId = (int) ((guildId >> 22) % Config.CONFIG.getNumShards());
+            } else {
+                shardId = Integer.parseInt(context.args[0]);
+            }
+        } catch (NumberFormatException e) {
+            HelpCommand.sendFormattedCommandHelp(context);
+            return;
+        }
+
+        boolean force = context.rawArgs.toLowerCase().contains("force");
+
+        context.replyWithName("Attempting to revive shard " + shardId);
+        try {
+            String answer = FredBoat.getShard(shardId).revive(force);
+            context.replyWithName(answer);
+        } catch (IndexOutOfBoundsException e) {
+            context.replyWithName("No such shard: " + shardId);
+        }
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
         return "{0}{1} <shardId> OR {0}{1} guild <guildId>\n#Revive the specified shard, or the shard of the specified guild.";
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.BOT_ADMIN;
     }
 }

@@ -25,55 +25,53 @@
 
 package fredboat.command.music.control;
 
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
-import fredboat.audio.queue.AudioTrackContext;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
-import fredboat.util.TextUtils;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
-import org.apache.commons.lang3.tuple.Pair;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 
-import java.text.MessageFormat;
-import java.util.List;
+import javax.annotation.Nonnull;
 
-public class StopCommand extends Command implements IMusicCommand {
+public class StopCommand extends Command implements IMusicCommand, ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
-        player.setCurrentTC(channel);
-        List<AudioTrackContext> tracks = player.getRemainingTracks();
-
-        Pair<Boolean, String> pair = player.canMemberSkipTracks(invoker, tracks);
-        //skipping allowed
-        if(pair.getLeft()) {
-            player.stop();
-            switch (tracks.size()) {
-                case 0:
-                    channel.sendMessage(I18n.get(guild).getString("stopAlreadyEmpty")).queue();
-                    break;
-                case 1:
-                    channel.sendMessage(I18n.get(guild).getString("stopEmptyOne")).queue();
-                    break;
-                default:
-                    channel.sendMessage(MessageFormat.format(I18n.get(guild).getString("stopEmptySeveral"), tracks.size())).queue();
-                    break;
-            }
-            player.leaveVoiceChannelRequest(channel, true);
-        } else {
-            //invoker is not allowed to skip all doz track
-            TextUtils.replyWithName(channel, invoker, pair.getRight());
-        }
+    public StopCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpStopCommand");
+    public void onInvoke(@Nonnull CommandContext context) {
+        GuildPlayer player = PlayerRegistry.getOrCreate(context.guild);
+        int tracksCount = player.getTrackCount();
+
+        player.pause();
+        player.stop();
+        switch (tracksCount) {
+            case 0:
+                context.reply(context.i18n("stopAlreadyEmpty"));
+                break;
+            case 1:
+                context.reply(context.i18n("stopEmptyOne"));
+                break;
+            default:
+                context.reply(context.i18nFormat("stopEmptySeveral", tracksCount));
+                break;
+        }
+        player.leaveVoiceChannelRequest(context, true);
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpStopCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

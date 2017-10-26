@@ -25,94 +25,125 @@
 
 package fredboat.command.moderation;
 
-import fredboat.Config;
 import fredboat.command.util.HelpCommand;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
 import fredboat.commandmeta.abs.IModerationCommand;
-import fredboat.feature.I18n;
+import fredboat.feature.metrics.Metrics;
+import fredboat.messaging.CentralMessaging;
+import fredboat.messaging.internal.Context;
 import fredboat.util.ArgumentUtil;
 import fredboat.util.DiscordUtil;
-import fredboat.util.TextUtils;
 import net.dv8tion.jda.core.Permission;
 import net.dv8tion.jda.core.entities.Guild;
 import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
+import net.dv8tion.jda.core.requests.RestAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.text.MessageFormat;
+import javax.annotation.Nonnull;
+import java.util.function.Consumer;
 
 public class SoftbanCommand extends Command implements IModerationCommand {
 
     private static final Logger log = LoggerFactory.getLogger(SoftbanCommand.class);
 
+    public SoftbanCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
+
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
+    public void onInvoke(@Nonnull CommandContext context) {
+        Guild guild = context.guild;
         //Ensure we have a search term
-        if(args.length == 1){
-            String command = args[0].substring(Config.CONFIG.getPrefix().length());
-            HelpCommand.sendFormattedCommandHelp(guild, channel, invoker, command);
+        if (!context.hasArguments()) {
+            HelpCommand.sendFormattedCommandHelp(context);
             return;
         }
 
-        Member target = ArgumentUtil.checkSingleFuzzySearchResult(channel, args[1]);
-
+        //was there a target provided?
+        Member target = ArgumentUtil.checkSingleFuzzyMemberSearchResult(context, context.args[0]);
         if (target == null) return;
 
-        if (!checkAuthorization(channel, invoker, target)) return;
+        //are we allowed to do that?
+        if (!checkAuthorization(context, target)) return;
 
-        target.getGuild().getController().ban(target, 7).queue(
-                aVoid -> {
-                    target.getGuild().getController().unban(target.getUser()).queue();
-                    TextUtils.replyWithName(channel, invoker, MessageFormat.format(I18n.get(guild).getString("softbanSuccess"), target.getUser().getName(), target.getUser().getDiscriminator(), target.getUser().getId()));
-                },
-                throwable -> log.error(MessageFormat.format(I18n.get(guild).getString("modBanFail"), target.getUser()))
-        );
+        //putting together a reason
+        String plainReason = DiscordUtil.getReasonForModAction(context);
+        String auditLogReason = DiscordUtil.formatReasonForAuditLog(plainReason, context.invoker);
+
+        //putting together the action
+        RestAction<Void> modAction = guild.getController().ban(target, 7, auditLogReason);
+
+        //on success
+        String successOutput = context.i18nFormat("softbanSuccess",
+                target.getUser().getName(), target.getUser().getDiscriminator(), target.getUser().getId())
+                + "\n" + plainReason;
+        Consumer<Void> onSuccess = aVoid -> {
+            Metrics.successfulRestActions.labels("ban").inc();
+            guild.getController().unban(target.getUser()).queue(
+                    __ -> Metrics.successfulRestActions.labels("unban").inc(),
+                    CentralMessaging.getJdaRestActionFailureHandler(String.format("Failed to unban user %s in guild %s",
+                            target.getUser().getId(), guild.getId()))
+            );
+            context.replyWithName(successOutput);
+        };
+
+        //on fail
+        String failOutput = context.i18nFormat("modBanFail", target.getUser());
+        Consumer<Throwable> onFail = t -> {
+            CentralMessaging.getJdaRestActionFailureHandler(String.format("Failed to ban user %s in guild %s",
+                    target.getUser().getId(), guild.getId())).accept(t);
+            context.replyWithName(failOutput);
+        };
+
+        //issue the mod action
+        modAction.queue(onSuccess, onFail);
     }
 
-    private boolean checkAuthorization(TextChannel channel, Member mod, Member target) {
+    private boolean checkAuthorization(CommandContext context, Member target) {
+        Member mod = context.invoker;
         if(mod == target) {
-            TextUtils.replyWithName(channel, mod, I18n.get(channel.getGuild()).getString("softbanFailSelf"));
+            context.replyWithName(context.i18n("softbanFailSelf"));
             return false;
         }
 
         if(target.isOwner()) {
-            TextUtils.replyWithName(channel, mod, I18n.get(channel.getGuild()).getString("softbanFailOwner"));
+            context.replyWithName(context.i18n("softbanFailOwner"));
             return false;
         }
 
         if(target == target.getGuild().getSelfMember()) {
-            TextUtils.replyWithName(channel, mod, I18n.get(channel.getGuild()).getString("softbanFailMyself"));
+            context.replyWithName(context.i18n("softbanFailMyself"));
             return false;
         }
 
         if (!mod.hasPermission(Permission.BAN_MEMBERS, Permission.KICK_MEMBERS) && !mod.isOwner()) {
-            TextUtils.replyWithName(channel, mod, I18n.get(channel.getGuild()).getString("modKickBanFailUserPerms"));
+            context.replyWithName(context.i18n("modKickBanFailUserPerms"));
             return false;
         }
 
         if (DiscordUtil.getHighestRolePosition(mod) <= DiscordUtil.getHighestRolePosition(target) && !mod.isOwner()) {
-            TextUtils.replyWithName(channel, mod, MessageFormat.format(I18n.get(channel.getGuild()).getString("modFailUserHierarchy"), target.getEffectiveName()));
+            context.replyWithName(context.i18nFormat("modFailUserHierarchy", target.getEffectiveName()));
             return false;
         }
 
         if (!mod.getGuild().getSelfMember().hasPermission(Permission.BAN_MEMBERS)) {
-            TextUtils.replyWithName(channel, mod, I18n.get(channel.getGuild()).getString("modBanBotPerms"));
+            context.replyWithName(context.i18n("modBanBotPerms"));
             return false;
         }
 
         if (DiscordUtil.getHighestRolePosition(mod.getGuild().getSelfMember()) <= DiscordUtil.getHighestRolePosition(target)) {
-            TextUtils.replyWithName(channel, mod, MessageFormat.format(I18n.get(channel.getGuild()).getString("modFailBotHierarchy"), target.getEffectiveName()));
+            context.replyWithName(context.i18nFormat("modFailBotHierarchy", target.getEffectiveName()));
             return false;
         }
 
         return true;
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1} <user>\n#";
-        return usage + I18n.get(guild).getString("helpSoftbanCommand");
+    public String help(@Nonnull Context context) {
+        return "{0}{1} <user> <reason>\n#" + context.i18n("helpSoftbanCommand");
     }
 }

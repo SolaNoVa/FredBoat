@@ -1,20 +1,51 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2017 Frederik Ar. Mikkelsen
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 package fredboat.command.util;
 
 import fredboat.Config;
 import fredboat.command.fun.RemoteFileCommand;
 import fredboat.command.fun.TextCommand;
 import fredboat.commandmeta.CommandRegistry;
-import fredboat.commandmeta.abs.*;
-import fredboat.feature.I18n;
-import fredboat.util.DiscordUtil;
+import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
+import fredboat.commandmeta.abs.IFunCommand;
+import fredboat.commandmeta.abs.IMaintenanceCommand;
+import fredboat.commandmeta.abs.IModerationCommand;
+import fredboat.commandmeta.abs.IUtilCommand;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
+import fredboat.perms.PermsUtil;
 import net.dv8tion.jda.core.Permission;
-import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
 
-import java.text.MessageFormat;
-import java.util.*;
+import javax.annotation.Nonnull;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Created by napster on 22.03.17.
@@ -27,26 +58,27 @@ import java.util.*;
  */
 public class CommandsCommand extends Command implements IUtilCommand {
 
+    public CommandsCommand(String name, String... aliases) {
+        super(name, aliases);
+    }
+
     //design inspiration by Weiss Schnee's bot
     //https://cdn.discordapp.com/attachments/230033957998166016/296356070685671425/unknown.png
     @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
+    public void onInvoke(@Nonnull CommandContext context) {
 
         //is this the music boat? shortcut to showing those commands
         //taking this shortcut we're missing out on showing a few commands to pure music bot users
         // http://i.imgur.com/511Hb8p.png screenshot from 1st April 2017
         //bot owner and debug commands (+ ;;music and ;;help) missing + the currently defunct config command
         //this is currently fine but might change in the future
-        if (DiscordUtil.isMusicBot()) {
-            new MusicHelpCommand().onInvoke(guild, channel, invoker, message, args);
-        }
-
-        if (DiscordUtil.isMainBot()) {
-            mainBotHelp(guild, channel, invoker);
+        new MusicHelpCommand("").onInvoke(context);
+        if (Config.CONFIG.isDevDistribution()) {
+            mainBotHelp(context); //TODO: decide how to do handle this after unification of main and music bot
         }
     }
 
-    private void mainBotHelp(Guild guild, TextChannel channel, Member invoker) {
+    private void mainBotHelp(CommandContext context) {
         Set<String> commandsAndAliases = CommandRegistry.getRegisteredCommandsAndAliases();
         Set<String> unsortedAliases = new HashSet<>(); //hash set = only unique commands
         for (String commandOrAlias : commandsAndAliases) {
@@ -57,18 +89,19 @@ public class CommandsCommand extends Command implements IUtilCommand {
         List<String> sortedAliases = new ArrayList<>(unsortedAliases);
         Collections.sort(sortedAliases);
 
-        String fun = "**" + I18n.get(guild).getString("commandsFun") + ":** ";
-        String memes = "**" + I18n.get(guild).getString("commandsMemes") + ":**";
-        String util = "**" + I18n.get(guild).getString("commandsUtility") + ":** ";
-        String mod = "**" + I18n.get(guild).getString("commandsModeration") + ":** ";
-        String maint = "**" + I18n.get(guild).getString("commandsMaintenance") + ":** ";
-        String owner = "**" + I18n.get(guild).getString("commandsBotOwner") + ":** ";
+        String fun = "**" + context.i18n("commandsFun") + ":** ";
+        String memes = "**" + context.i18n("commandsMemes") + ":**";
+        String util = "**" + context.i18n("commandsUtility") + ":** ";
+        String mod = "**" + context.i18n("commandsModeration") + ":** ";
+        String maint = "**" + context.i18n("commandsMaintenance") + ":** ";
+        String owner = "**" + context.i18n("commandsBotOwner") + ":** ";
 
         for (String alias : sortedAliases) {
             Command c = CommandRegistry.getCommand(alias).command;
             String formattedAlias = "`" + alias + "` ";
 
-            if (c instanceof ICommandOwnerRestricted) {
+            if (c instanceof ICommandRestricted
+                    && ((ICommandRestricted) c).getMinimumPerms() == PermissionLevel.BOT_OWNER) {
                 owner += formattedAlias;
             } else if (c instanceof TextCommand || c instanceof RemoteFileCommand) {
                 memes += formattedAlias;
@@ -93,22 +126,25 @@ public class CommandsCommand extends Command implements IUtilCommand {
         out += "\n" + util;
         out += "\n" + memes;
 
-        if (invoker.hasPermission(Permission.MESSAGE_MANAGE)) {
+        if (context.invoker.hasPermission(Permission.MESSAGE_MANAGE)) {
             out += "\n" + mod;
         }
 
-        if (DiscordUtil.isUserBotOwner(invoker.getUser())) {
+        if (PermsUtil.checkPerms(PermissionLevel.BOT_ADMIN, context.invoker)) {
             out += "\n" + maint;
+        }
+
+        if (PermsUtil.checkPerms(PermissionLevel.BOT_OWNER, context.invoker)) {
             out += "\n" + owner;
         }
 
-        out += "\n\n" + MessageFormat.format(I18n.get(guild).getString("commandsMoreHelp"), "`" + Config.CONFIG.getPrefix() + "help <command>`");
-        channel.sendMessage(out).queue();
+        out += "\n\n" + context.i18nFormat("commandsMoreHelp", "`" + Config.CONFIG.getPrefix() + "help <command>`");
+        context.reply(out);
     }
 
+    @Nonnull
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpCommandsCommand");
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpCommandsCommand");
     }
 }

@@ -25,46 +25,59 @@
 
 package fredboat.command.music.control;
 
-import fredboat.audio.GuildPlayer;
-import fredboat.audio.PlayerRegistry;
+import fredboat.audio.player.GuildPlayer;
+import fredboat.audio.player.LavalinkManager;
+import fredboat.audio.player.PlayerRegistry;
 import fredboat.commandmeta.abs.Command;
+import fredboat.commandmeta.abs.CommandContext;
+import fredboat.commandmeta.abs.ICommandRestricted;
 import fredboat.commandmeta.abs.IMusicCommand;
-import fredboat.feature.I18n;
+import fredboat.messaging.internal.Context;
+import fredboat.perms.PermissionLevel;
 import net.dv8tion.jda.core.entities.Guild;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.TextChannel;
 
-public class UnpauseCommand extends Command implements IMusicCommand {
+import javax.annotation.Nonnull;
 
-    private static final JoinCommand JOIN_COMMAND = new JoinCommand();
+public class UnpauseCommand extends Command implements IMusicCommand, ICommandRestricted {
 
-    @Override
-    public void onInvoke(Guild guild, TextChannel channel, Member invoker, Message message, String[] args) {
-        GuildPlayer player = PlayerRegistry.get(guild);
-        player.setCurrentTC(channel);
-        if (player.isQueueEmpty()) {
-            channel.sendMessage(I18n.get(guild).getString("unpauseQueueEmpty")).queue();
-        } else if (!player.isPaused()) {
-            channel.sendMessage(I18n.get(guild).getString("unpausePlayerNotPaused")).queue();
-        } else if (player.getHumanUsersInVC().isEmpty() && player.isPaused() && guild.getAudioManager().isConnected()) {
-            channel.sendMessage(I18n.get(guild).getString("unpauseNoUsers")).queue();
-        } else if(!guild.getAudioManager().isConnected()) {
-            // When we just want to continue playing, but the user is not in a VC
-            JOIN_COMMAND.onInvoke(guild, channel, invoker, message, new String[0]);
-            if(guild.getAudioManager().isConnected() || guild.getAudioManager().isAttemptingToConnect()) {
-                player.play();
-                channel.sendMessage(I18n.get(guild).getString("unpauseSuccess")).queue();
-            }
-        } else {
-            player.play();
-            channel.sendMessage(I18n.get(guild).getString("unpauseSuccess")).queue();
-        }
+    private static final JoinCommand JOIN_COMMAND = new JoinCommand("");
+
+    public UnpauseCommand(String name, String... aliases) {
+        super(name, aliases);
     }
 
     @Override
-    public String help(Guild guild) {
-        String usage = "{0}{1}\n#";
-        return usage + I18n.get(guild).getString("helpUnpauseCommand");
+    public void onInvoke(@Nonnull CommandContext context) {
+        Guild guild = context.guild;
+        GuildPlayer player = PlayerRegistry.getOrCreate(guild);
+        if (player.isQueueEmpty()) {
+            context.reply(context.i18n("unpauseQueueEmpty"));
+        } else if (!player.isPaused()) {
+            context.reply(context.i18n("unpausePlayerNotPaused"));
+        } else if (player.getHumanUsersInCurrentVC().isEmpty() && player.isPaused() && LavalinkManager.ins.getConnectedChannel(guild) != null) {
+            context.reply(context.i18n("unpauseNoUsers"));
+        } else if (LavalinkManager.ins.getConnectedChannel(context.guild) == null) {
+            // When we just want to continue playing, but the user is not in a VC
+            JOIN_COMMAND.onInvoke(context);
+            if(LavalinkManager.ins.getConnectedChannel(guild) != null || guild.getAudioManager().isAttemptingToConnect()) {
+                player.play();
+                context.reply(context.i18n("unpauseSuccess"));
+            }
+        } else {
+            player.play();
+            context.reply(context.i18n("unpauseSuccess"));
+        }
+    }
+
+    @Nonnull
+    @Override
+    public String help(@Nonnull Context context) {
+        return "{0}{1}\n#" + context.i18n("helpUnpauseCommand");
+    }
+
+    @Nonnull
+    @Override
+    public PermissionLevel getMinimumPerms() {
+        return PermissionLevel.DJ;
     }
 }

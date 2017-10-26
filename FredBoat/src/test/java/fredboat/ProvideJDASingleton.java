@@ -1,7 +1,7 @@
 package fredboat;
 
-import fredboat.db.DatabaseManager;
-import fredboat.util.BotConstants;
+import fredboat.messaging.CentralMessaging;
+import fredboat.shared.constant.BotConstants;
 import fredboat.util.TextUtils;
 import net.dv8tion.jda.core.AccountType;
 import net.dv8tion.jda.core.EmbedBuilder;
@@ -19,7 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.security.auth.login.LoginException;
 import java.awt.*;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.text.DateFormat;
@@ -27,12 +26,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Created by napster on 22.03.17.
  * <p>
  * <p>
- * Extend this class from all tests that require a JDA instance
+ * Extend this class from all tests that require a JDA ins
  * <p>
  * <p>
  * Extend this class from all other tests and call bumpPassedTests() after every successful @Test function & call
@@ -67,12 +68,12 @@ public abstract class ProvideJDASingleton {
     private static int totalAttempted = 0;
     private static List<String> classStats = new ArrayList<>();
 
-    private static Thread SHUTDOWNHOOK = new Thread() {
+    private static Thread SHUTDOWNHOOK = new Thread(ProvideJDASingleton.class.getSimpleName() + " shutdownhook") {
         @Override
         public void run() {
 
             //don't set a thumbnail, that decreases our space to display the tests results
-            EmbedBuilder eb = new EmbedBuilder();
+            EmbedBuilder eb = CentralMessaging.getClearThreadLocalEmbedBuilder();
             eb.setAuthor(jda.getSelfUser().getName(), jda.getSelfUser().getAvatarUrl(), jda.getSelfUser().getAvatarUrl());
 
             eb.addField("Total tests passed", totalPassed + "", true);
@@ -124,10 +125,12 @@ public abstract class ProvideJDASingleton {
             eb.setFooter(jda.getSelfUser().getName(), jda.getSelfUser().getAvatarUrl());
             eb.setTimestamp(Instant.now());
 
-            testChannel.sendMessage(eb.build()).complete();
+            try {
+                CentralMessaging.sendMessage(testChannel, eb.build()).getWithDefaultTimeout();
+            } catch (TimeoutException | ExecutionException | InterruptedException ignored) {
+            }
 
-            jda.shutdown(true);
-            DatabaseManager.shutdown();
+            jda.shutdown();
         }
     };
 
@@ -139,9 +142,7 @@ public abstract class ProvideJDASingleton {
         try {
             startTime = System.currentTimeMillis();
             log.info("Setting up live testing environment");
-            try {
-                Config.loadDefaultConfig(0x111);
-            } catch (FileNotFoundException e) {
+            if (Config.CONFIG == null) {
                 log.info("Credentials and/or config files not found, live tests won't be available");
                 return;
             }
@@ -166,13 +167,13 @@ public abstract class ProvideJDASingleton {
             String spacer = "";
             for (int i = 0; i < out.length(); i++) spacer += "#";
             out = spacer + "\n" + out + "\n" + spacer;
-            out = TextUtils.asMarkdown(out);
-            testChannel.sendMessage(out).complete();
+            out = TextUtils.asCodeBlock(out, "md");
+            CentralMessaging.sendMessage(testChannel, out).getWithDefaultTimeout();
 
             initialized = true;
             //post final test stats and shut down the JDA instance when testing is done
             Runtime.getRuntime().addShutdownHook(SHUTDOWNHOOK);
-        } catch (RateLimitedException | LoginException | InterruptedException | IOException e) {
+        } catch (RateLimitedException | LoginException | InterruptedException | IOException | ExecutionException | TimeoutException e) {
             log.error("Could not create JDA object for tests", e);
         }
     }
