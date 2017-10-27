@@ -2,7 +2,7 @@
     "command": [
         "java",
         "-jar",
-        "FredBoat-1.0.jar"
+        "FredBoat.jar"
     ],
-    "jarName": "FredBoat-1.0.jar"
+    "jarName": "FredBoat.jar"
 }
