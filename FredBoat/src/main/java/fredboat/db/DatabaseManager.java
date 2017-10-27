@@ -60,17 +60,14 @@ public class DatabaseManager {
     private static final int SSH_TUNNEL_PORT = 9333;
 
     private String jdbcUrl;
-    private String dialect;
     private int poolSize;
 
     /**
      * @param jdbcUrl  connection to the database
-     * @param dialect  set to null or empty String to have it auto detected by Hibernate, chosen jdbc driver must support that
      * @param poolSize max size of the connection pool
      */
-    public DatabaseManager(String jdbcUrl, String dialect, int poolSize) {
+    public DatabaseManager(String jdbcUrl, int poolSize) {
         this.jdbcUrl = jdbcUrl;
-        this.dialect = dialect;
         this.poolSize = poolSize;
     }
 
@@ -100,7 +97,7 @@ public class DatabaseManager {
 
             properties.put("hibernate.connection.provider_class", "org.hibernate.hikaricp.internal.HikariCPConnectionProvider");
             properties.put("hibernate.connection.url", jdbcUrl);
-            if (dialect != null && !"".equals(dialect)) properties.put("hibernate.dialect", dialect);
+            properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQL95Dialect");
             properties.put("hibernate.cache.use_second_level_cache", "true");
             properties.put("hibernate.cache.provider_configuration_file_resource_path", "ehcache.xml");
             properties.put("hibernate.cache.region.factory_class", "org.hibernate.cache.ehcache.EhCacheRegionFactory");

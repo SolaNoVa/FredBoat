@@ -128,18 +128,16 @@ public abstract class FredBoat {
             log.info("Failed to ignite Spark, FredBoat API unavailable", e);
         }
 
-        if (!Config.CONFIG.getJdbcUrl().equals("")) {
-            dbManager = new DatabaseManager(Config.CONFIG.getJdbcUrl(), null, Config.CONFIG.getHikariPoolSize());
-            dbManager.startup();
-            FredBoatAgent.start(new DBConnectionWatchdogAgent(dbManager));
-        } else if (Config.CONFIG.getNumShards() > 2) {
-            log.warn("No JDBC URL and more than 2 shard found! Initializing the SQLi DB is potentially dangerous too. Skipping...");
+        if (Config.CONFIG.getJdbcUrl() != null && !"".equals(Config.CONFIG.getJdbcUrl())) {
+            //custom jdbc url provided
+            dbManager = new DatabaseManager(Config.CONFIG.getJdbcUrl(), Config.CONFIG.getHikariPoolSize());
         } else {
-            log.warn("No JDBC URL found, skipped database connection, falling back to internal SQLite db.");
-            dbManager = new DatabaseManager("jdbc:sqlite:fredboat.db", "org.hibernate.dialect.SQLiteDialect",
+            log.info("No JDBC URL found, assuming this is a docker environment. Trying default docker JDBC url");
+            dbManager = new DatabaseManager("jdbc:postgresql://db:5432/fredboat?user=fredboat",
                     Config.CONFIG.getHikariPoolSize());
-            dbManager.startup();
         }
+        dbManager.startup();
+        FredBoatAgent.start(new DBConnectionWatchdogAgent(dbManager));
 
         //Initialise event listeners
         mainEventListener = new EventListenerBoat();
