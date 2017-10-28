@@ -41,6 +41,7 @@ import fredboat.event.EventListenerBoat;
 import fredboat.feature.I18n;
 import fredboat.feature.metrics.Metrics;
 import fredboat.shared.constant.DistributionEnum;
+import fredboat.shared.constant.ExitCodes;
 import fredboat.util.AppInfo;
 import fredboat.util.ConnectQueue;
 import fredboat.util.GitRepoState;
@@ -136,7 +137,24 @@ public abstract class FredBoat {
             dbManager = new DatabaseManager("jdbc:postgresql://db:5432/fredboat?user=fredboat",
                     Config.CONFIG.getHikariPoolSize());
         }
-        dbManager.startup();
+
+        //attempt to connect to the database a few times
+        // this is relevant in a dockerized environment because after a reboot there is no guarantee that the db
+        // container will be started before the fredboat one
+        int dbConnectionAttempts = 0;
+        while (!dbManager.isAvailable() && dbConnectionAttempts++ < 10) {
+            try {
+                dbManager.startup();
+            } catch (Exception e) {
+                log.error("Could not connect to the database. Retrying in a moment...", e);
+                Thread.sleep(5000);
+            }
+        }
+        if (!dbManager.isAvailable()) {
+            log.error("Could not establish database connection. Exiting...");
+            shutdown(ExitCodes.EXIT_CODE_ERROR);
+        }
+
         FredBoatAgent.start(new DBConnectionWatchdogAgent(dbManager));
 
         //Initialise event listeners
